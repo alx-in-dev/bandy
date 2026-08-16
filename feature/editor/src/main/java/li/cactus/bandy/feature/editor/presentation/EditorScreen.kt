@@ -17,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -224,22 +226,25 @@ private fun EditorBody(
 
         // Before / After preview
         Text("Прослушивание", style = MaterialTheme.typography.labelLarge)
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            SegmentedButton(
-                selected = state.previewMode == PreviewMode.OFF,
-                onClick = { onEvent(EditorScreenEvent.PreviewModeChanged(PreviewMode.OFF)) },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
-            ) { Text("Стоп") }
-            SegmentedButton(
-                selected = state.previewMode == PreviewMode.BEFORE,
-                onClick = { onEvent(EditorScreenEvent.PreviewModeChanged(PreviewMode.BEFORE)) },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
-            ) { Text("До") }
-            SegmentedButton(
-                selected = state.previewMode == PreviewMode.AFTER,
-                onClick = { onEvent(EditorScreenEvent.PreviewModeChanged(PreviewMode.AFTER)) },
-                shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
-            ) { Text("После") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlayToggleButton(
+                label = "До",
+                playing = state.previewMode == PreviewMode.BEFORE,
+                onClick = {
+                    val target = if (state.previewMode == PreviewMode.BEFORE) PreviewMode.OFF else PreviewMode.BEFORE
+                    onEvent(EditorScreenEvent.PreviewModeChanged(target))
+                },
+                modifier = Modifier.weight(1f),
+            )
+            PlayToggleButton(
+                label = "После",
+                playing = state.previewMode == PreviewMode.AFTER,
+                onClick = {
+                    val target = if (state.previewMode == PreviewMode.AFTER) PreviewMode.OFF else PreviewMode.AFTER
+                    onEvent(EditorScreenEvent.PreviewModeChanged(target))
+                },
+                modifier = Modifier.weight(1f),
+            )
         }
 
         Row(
@@ -285,6 +290,28 @@ private fun EditorBody(
             } else {
                 Text("Сохранить")
             }
+        }
+    }
+}
+
+@Composable
+private fun PlayToggleButton(
+    label: String,
+    playing: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (playing) {
+        Button(onClick = onClick, modifier = modifier) {
+            Icon(Icons.Default.Stop, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text(label)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier) {
+            Icon(Icons.Default.PlayArrow, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text(label)
         }
     }
 }
@@ -351,7 +378,9 @@ private fun PeriodicitySection(
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
+            PlayToggleButton(
+                label = if (state.isPlayingSyncAverage) "Стоп" else "Усреднённый цикл",
+                playing = state.isPlayingSyncAverage,
                 onClick = {
                     if (state.isPlayingSyncAverage) {
                         onEvent(EditorScreenEvent.StopPreview)
@@ -360,9 +389,7 @@ private fun PeriodicitySection(
                     }
                 },
                 modifier = Modifier.weight(1f),
-            ) {
-                Text(if (state.isPlayingSyncAverage) "Стоп" else "Прослушать усреднённый цикл")
-            }
+            )
             FilledTonalButton(
                 onClick = { onEvent(EditorScreenEvent.ApplyCombFilter) },
                 enabled = !state.isApplyingPeriodicity,
