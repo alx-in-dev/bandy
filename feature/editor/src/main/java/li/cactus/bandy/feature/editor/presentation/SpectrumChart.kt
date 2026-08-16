@@ -20,14 +20,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
-import kotlin.math.log10
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import li.cactus.bandy.core.domain.model.AveragedSpectrum
 import li.cactus.bandy.core.domain.model.FrequencyBand
 import li.cactus.bandy.core.ui.HeatColor
-
-private const val MIN_LOG_HZ = 20f
 
 private enum class HandleKind { EDGE_LOW, EDGE_HIGH, MOVE }
 
@@ -84,7 +80,7 @@ internal fun SpectrumChart(
                         val target = dragTarget ?: return@detectDragGestures
                         change.consume()
                         val x = change.position.x.coerceIn(0f, widthPx)
-                        val freq = xToFreq(x, currentScale, maxHz, widthPx)
+                        val freq = pixelToFreq(x, currentScale, maxHz, widthPx)
                         val band = currentBands.getOrNull(target.bandIndex) ?: return@detectDragGestures
                         when (target.kind) {
                             HandleKind.EDGE_LOW -> onChanged(target.bandIndex, freq.roundToInt(), band.highHz)
@@ -101,8 +97,8 @@ internal fun SpectrumChart(
         widthPx = size.width
         drawSpectrum(spectrum, currentScale, maxHz)
         currentBands.forEachIndexed { index, band ->
-            val xLow = freqToX(band.lowHz.toFloat(), currentScale, maxHz, size.width)
-            val xHigh = freqToX(band.highHz.toFloat(), currentScale, maxHz, size.width)
+            val xLow = freqToPixel(band.lowHz.toFloat(), currentScale, maxHz, size.width)
+            val xHigh = freqToPixel(band.highHz.toFloat(), currentScale, maxHz, size.width)
             val isSelected = index == selectedIndex
             drawRect(
                 color = if (isSelected) selectedBandColor else bandColor,
@@ -131,7 +127,7 @@ private fun DrawScope.drawSpectrum(
     val widthPx = size.width.toInt().coerceAtLeast(1)
 
     for (x in 0 until widthPx) {
-        val freq = xToFreq(x + 0.5f, scale, maxHz, size.width)
+        val freq = pixelToFreq(x + 0.5f, scale, maxHz, size.width)
         if (scale == FreqScale.LOG && freq < MIN_LOG_HZ) continue
         val bin = (freq / binHz).roundToInt().coerceIn(0, mags.lastIndex)
         val normalized = (mags[bin] / maxMag).coerceIn(0f, 1f)
@@ -159,8 +155,8 @@ private fun hitTest(
     var bestEdge: DragTarget? = null
     var bestDist = slop
     bands.forEachIndexed { index, band ->
-        val xLow = freqToX(band.lowHz.toFloat(), scale, maxHz, width)
-        val xHigh = freqToX(band.highHz.toFloat(), scale, maxHz, width)
+        val xLow = freqToPixel(band.lowHz.toFloat(), scale, maxHz, width)
+        val xHigh = freqToPixel(band.highHz.toFloat(), scale, maxHz, width)
         val dLow = abs(x - xLow)
         val dHigh = abs(x - xHigh)
         if (dLow <= bestDist) {
@@ -174,30 +170,9 @@ private fun hitTest(
     }
     if (bestEdge != null) return bestEdge
 
-    val freq = xToFreq(x, scale, maxHz, width)
+    val freq = pixelToFreq(x, scale, maxHz, width)
     val insideIndex = bands.indexOfFirst { freq >= it.lowHz && freq <= it.highHz }
     if (insideIndex < 0) return null
     val band = bands[insideIndex]
     return DragTarget(insideIndex, HandleKind.MOVE, originLowHz = band.lowHz, originFreqHz = freq)
-}
-
-private fun freqToX(freq: Float, scale: FreqScale, maxHz: Float, width: Float): Float = when (scale) {
-    FreqScale.LINEAR -> (freq / maxHz) * width
-    FreqScale.LOG -> {
-        val f = freq.coerceAtLeast(MIN_LOG_HZ)
-        ((log10(f) - log10(MIN_LOG_HZ)) / (log10(maxHz) - log10(MIN_LOG_HZ))) * width
-    }
-}
-
-private fun xToFreq(x: Float, scale: FreqScale, maxHz: Float, width: Float): Float {
-    if (width <= 0f) return 0f
-    val t = (x / width).coerceIn(0f, 1f)
-    return when (scale) {
-        FreqScale.LINEAR -> t * maxHz
-        FreqScale.LOG -> {
-            val logMin = log10(MIN_LOG_HZ)
-            val logMax = log10(maxHz)
-            10f.pow(t * (logMax - logMin) + logMin)
-        }
-    }
 }

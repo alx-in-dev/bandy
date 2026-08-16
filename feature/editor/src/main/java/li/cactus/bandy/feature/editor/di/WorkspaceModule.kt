@@ -15,6 +15,7 @@ val editorModule = module {
             updateAudioSettings = get(),
             getRecordingUseCase = get(),
             getAveragedSpectrumUseCase = get(),
+            getSpectrogramUseCase = get(),
             applyBandPassFilterUseCase = get(),
             previewPlaybackUseCase = get(),
             analyzePeriodicityUseCase = get(),

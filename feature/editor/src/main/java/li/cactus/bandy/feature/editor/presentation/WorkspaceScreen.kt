@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -421,9 +422,26 @@ private fun EditingBody(
     val spectrum = state.spectrum ?: return
     Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
+        // Chart style
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("График:", style = MaterialTheme.typography.labelLarge)
+            SingleChoiceSegmentedButtonRow {
+                SegmentedButton(
+                    selected = state.chartStyle == ChartStyle.AVERAGED,
+                    onClick = { onEvent(WorkspaceScreenEvent.ChartStyleChanged(ChartStyle.AVERAGED)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                ) { Text("Спектр") }
+                SegmentedButton(
+                    selected = state.chartStyle == ChartStyle.SPECTROGRAM,
+                    onClick = { onEvent(WorkspaceScreenEvent.ChartStyleChanged(ChartStyle.SPECTROGRAM)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                ) { Text("Спектрограмма") }
+            }
+        }
+
         // Scale toggle
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Шкала X:", style = MaterialTheme.typography.labelLarge)
+            Text("Шкала частоты:", style = MaterialTheme.typography.labelLarge)
             SingleChoiceSegmentedButtonRow {
                 SegmentedButton(
                     selected = state.scale == FreqScale.LOG,
@@ -438,26 +456,70 @@ private fun EditingBody(
             }
         }
 
-        SpectrumChart(
-            spectrum = spectrum,
-            bands = state.bands,
-            selectedIndex = state.selectedBandIndex,
-            scale = state.scale,
-            onBandChanged = { index, low, high ->
-                onEvent(WorkspaceScreenEvent.BandChanged(index, low, high))
-            },
-            onBandMoved = { index, low ->
-                onEvent(WorkspaceScreenEvent.BandMoved(index, low))
-            },
-            onBandSelected = { index ->
-                onEvent(WorkspaceScreenEvent.BandSelected(index))
-            },
-        )
-        if (state.bands.isNotEmpty()) {
+        when (state.chartStyle) {
+            ChartStyle.AVERAGED -> {
+                SpectrumChart(
+                    spectrum = spectrum,
+                    bands = state.bands,
+                    selectedIndex = state.selectedBandIndex,
+                    scale = state.scale,
+                    onBandChanged = { index, low, high ->
+                        onEvent(WorkspaceScreenEvent.BandChanged(index, low, high))
+                    },
+                    onBandMoved = { index, low ->
+                        onEvent(WorkspaceScreenEvent.BandMoved(index, low))
+                    },
+                    onBandSelected = { index ->
+                        onEvent(WorkspaceScreenEvent.BandSelected(index))
+                    },
+                )
+                if (state.bands.isNotEmpty()) {
+                    Text(
+                        "Перетащите край полосы, чтобы изменить границу, или её середину — чтобы сдвинуть целиком",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            ChartStyle.SPECTROGRAM -> {
+                val spectrogram = state.spectrogram
+                if (state.isLoadingSpectrogram || spectrogram == null) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(220.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    SpectrogramChart(
+                        frames = spectrogram,
+                        bands = state.bands,
+                        selectedIndex = state.selectedBandIndex,
+                        scale = state.scale,
+                    )
+                    Text(
+                        "Время слева направо, частота снизу вверх — полосы показаны как области, но перетаскивание доступно на графике «Спектр»",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        val selectedBand = state.selectedBandIndex?.let { state.bands.getOrNull(it) }
+        if (selectedBand != null) {
+            val width = selectedBand.highHz - selectedBand.lowHz
+            val maxLow = (state.nyquistHz - width).coerceAtLeast(0)
             Text(
-                "Перетащите край полосы, чтобы изменить границу, или её середину — чтобы сдвинуть целиком",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                "Сдвиг выбранной полосы: ${selectedBand.lowHz}–${selectedBand.highHz} Гц",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Slider(
+                value = selectedBand.lowHz.toFloat().coerceIn(0f, maxLow.toFloat()),
+                onValueChange = {
+                    onEvent(WorkspaceScreenEvent.BandMoved(state.selectedBandIndex, it.toInt()))
+                },
+                valueRange = 0f..maxLow.toFloat().coerceAtLeast(1f),
             )
         }
 

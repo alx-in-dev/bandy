@@ -17,6 +17,7 @@ import li.cactus.bandy.core.domain.usecase.ApplyCombFilterUseCase
 import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCase
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.GetRecordingUseCase
+import li.cactus.bandy.core.domain.usecase.GetSpectrogramUseCase
 import li.cactus.bandy.core.domain.usecase.ObserveAudioSettingsUseCase
 import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.ObserveRecordingSessionUseCase
@@ -42,6 +43,7 @@ internal class WorkspaceViewModel(
     private val updateAudioSettings: UpdateAudioSettingsUseCase,
     private val getRecordingUseCase: GetRecordingUseCase,
     private val getAveragedSpectrumUseCase: GetAveragedSpectrumUseCase,
+    private val getSpectrogramUseCase: GetSpectrogramUseCase,
     private val applyBandPassFilterUseCase: ApplyBandPassFilterUseCase,
     private val previewPlaybackUseCase: PreviewPlaybackUseCase,
     private val analyzePeriodicityUseCase: AnalyzePeriodicityUseCase,
@@ -100,6 +102,8 @@ internal class WorkspaceViewModel(
                 updateAudioSettings.setFftWindowSize(viewEvent.size)
             }
 
+            is WorkspaceScreenEvent.ChartStyleChanged -> setChartStyle(viewEvent.style)
+
             is WorkspaceScreenEvent.ScaleChanged -> setState { copy(scale = viewEvent.scale) }
 
             is WorkspaceScreenEvent.AddBand -> addBand()
@@ -112,7 +116,7 @@ internal class WorkspaceViewModel(
                         periodicityAnalysis = null,
                     )
                 }
-                restartPreviewIfActive()
+                applyLiveFilterUpdate()
             }
 
             is WorkspaceScreenEvent.BandChanged -> changeBand(viewEvent.index, viewEvent.lowHz, viewEvent.highHz)
@@ -131,7 +135,7 @@ internal class WorkspaceViewModel(
 
             is WorkspaceScreenEvent.ButterworthOrderChanged -> {
                 setState { copy(butterworthOrder = viewEvent.order.coerceIn(2, 8), periodicityAnalysis = null) }
-                restartPreviewIfActive()
+                applyLiveFilterUpdate()
             }
 
             is WorkspaceScreenEvent.PreviewModeChanged -> setPreviewMode(viewEvent.mode)
@@ -242,9 +246,21 @@ internal class WorkspaceViewModel(
         }
     }
 
+    private fun setChartStyle(style: ChartStyle) {
+        setState { copy(chartStyle = style) }
+        val recording = currentState.recording ?: return
+        if (style == ChartStyle.SPECTROGRAM && currentState.spectrogram == null && !currentState.isLoadingSpectrogram) {
+            setState { copy(isLoadingSpectrogram = true) }
+            viewModelScope.launch {
+                val spectrogram = getSpectrogramUseCase(recording.filePath, FFT_WINDOW_SIZE)
+                setState { copy(isLoadingSpectrogram = false, spectrogram = spectrogram) }
+            }
+        }
+    }
+
     private fun setBands(bands: List<FrequencyBand>) {
         setState { copy(bands = bands.sortedBy { it.lowHz }, selectedBandIndex = null, periodicityAnalysis = null) }
-        restartPreviewIfActive()
+        applyLiveFilterUpdate()
     }
 
     private fun addBand() {
@@ -271,7 +287,7 @@ internal class WorkspaceViewModel(
             if (i == index) FrequencyBand(clampedLow, clampedHigh) else band
         }
         setState { copy(bands = updated, periodicityAnalysis = null) }
-        restartPreviewIfActive()
+        applyLiveFilterUpdate()
     }
 
     /** Translates a band (preserving its width) to a new low edge, clamped against neighbors. */
@@ -290,7 +306,7 @@ internal class WorkspaceViewModel(
 
         val updated = bands.mapIndexed { i, b -> if (i == index) FrequencyBand(newLow, newHigh) else b }
         setState { copy(bands = updated, periodicityAnalysis = null) }
-        restartPreviewIfActive()
+        applyLiveFilterUpdate()
     }
 
     private fun setPreviewMode(mode: PreviewMode) {
@@ -305,12 +321,20 @@ internal class WorkspaceViewModel(
         setState { copy(previewMode = mode, isPlayingSyncAverage = false) }
     }
 
-    /** Bands/order changes only need to restart an active AFTER preview; [alsoRestartBefore] additionally
-     * restarts BEFORE, used when only the loop flag changed and BEFORE playback should pick it up live. */
+    /** Used only for the loop-flag toggle, which can't be hot-swapped mid-stream; [alsoRestartBefore]
+     * restarts BEFORE too so it picks up the new loop flag live, not just AFTER. */
     private fun restartPreviewIfActive(alsoRestartBefore: Boolean = false) {
         val mode = currentState.previewMode
         if (mode == PreviewMode.AFTER || (alsoRestartBefore && mode == PreviewMode.BEFORE)) {
             setPreviewMode(mode)
+        }
+    }
+
+    /** Band/order edits hot-swap the filter of an active AFTER preview in place — no restart, so
+     * the change is heard immediately instead of the playback jumping back to the start. */
+    private fun applyLiveFilterUpdate() {
+        if (currentState.previewMode == PreviewMode.AFTER) {
+            previewPlaybackUseCase.updateFilter(currentFilterSettings())
         }
     }
 

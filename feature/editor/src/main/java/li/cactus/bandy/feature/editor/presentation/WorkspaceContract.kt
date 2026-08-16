@@ -8,6 +8,7 @@ import li.cactus.bandy.core.domain.model.PeriodicityAnalysis
 import li.cactus.bandy.core.domain.model.Recording
 import li.cactus.bandy.core.domain.model.RecordingSession
 import li.cactus.bandy.core.domain.model.SampleRateOption
+import li.cactus.bandy.core.domain.model.SpectrumFrame
 
 /** A single screen: record a new take, then edit it in place — no navigation between the two. */
 enum class WorkspacePhase { RECORDING, EDITING }
@@ -15,6 +16,11 @@ enum class WorkspacePhase { RECORDING, EDITING }
 enum class FreqScale { LINEAR, LOG }
 
 enum class PreviewMode { OFF, BEFORE, AFTER }
+
+/** AVERAGED: frequency (X) vs amplitude (Y), one snapshot for the whole recording.
+ * SPECTROGRAM: time (X) vs frequency (Y), heat-colored amplitude — same visual language as the
+ * live waterfall on the recording phase. */
+enum class ChartStyle { AVERAGED, SPECTROGRAM }
 
 data class WorkspaceScreenState(
     val phase: WorkspacePhase = WorkspacePhase.RECORDING,
@@ -30,6 +36,9 @@ data class WorkspaceScreenState(
     val errorLoading: Boolean = false,
     val recording: Recording? = null,
     val spectrum: AveragedSpectrum? = null,
+    val chartStyle: ChartStyle = ChartStyle.AVERAGED,
+    val spectrogram: List<SpectrumFrame>? = null,
+    val isLoadingSpectrogram: Boolean = false,
     val bands: List<FrequencyBand> = emptyList(),
     val selectedBandIndex: Int? = null,
     val scale: FreqScale = FreqScale.LOG,
@@ -64,6 +73,7 @@ sealed interface WorkspaceScreenEvent {
     data class OnFftWindowSelected(val size: FftWindowSize) : WorkspaceScreenEvent
 
     // Editing phase
+    data class ChartStyleChanged(val style: ChartStyle) : WorkspaceScreenEvent
     data class ScaleChanged(val scale: FreqScale) : WorkspaceScreenEvent
     data object AddBand : WorkspaceScreenEvent
     data class RemoveBand(val index: Int) : WorkspaceScreenEvent

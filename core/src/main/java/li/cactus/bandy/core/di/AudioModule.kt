@@ -24,6 +24,8 @@ import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCase
 import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCaseImpl
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.GetSpectrogramUseCase
+import li.cactus.bandy.core.domain.usecase.GetSpectrogramUseCaseImpl
 import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCaseImpl
 import li.cactus.bandy.core.domain.usecase.ObserveRecordingSessionUseCase
@@ -56,6 +58,7 @@ val audioModule = module {
     factoryOf(::ObserveRecordingSessionUseCaseImpl) bind ObserveRecordingSessionUseCase::class
     factoryOf(::ObserveLiveSpectrumUseCaseImpl) bind ObserveLiveSpectrumUseCase::class
     factoryOf(::GetAveragedSpectrumUseCaseImpl) bind GetAveragedSpectrumUseCase::class
+    factoryOf(::GetSpectrogramUseCaseImpl) bind GetSpectrogramUseCase::class
     factoryOf(::ApplyBandPassFilterUseCaseImpl) bind ApplyBandPassFilterUseCase::class
     singleOf(::PreviewPlaybackUseCaseImpl) bind PreviewPlaybackUseCase::class
     factoryOf(::ShareRecordingUseCaseImpl) bind ShareRecordingUseCase::class

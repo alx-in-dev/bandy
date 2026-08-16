@@ -19,5 +19,8 @@ interface LivePreviewPlayer {
      */
     fun play(sourceFilePath: String, settings: FilterSettings?, loop: Boolean = false)
     fun stop()
+    /** Hot-swaps the band-pass filter of the current "after" session without restarting playback
+     * position — no-op if nothing is playing or the current session started without a filter. */
+    fun updateFilter(settings: FilterSettings)
     val isPlaying: StateFlow<Boolean>
 }

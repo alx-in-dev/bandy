@@ -33,6 +33,27 @@ class SpectrumAnalyzer(private val windowSize: Int) {
         return sqrt(sum / samples.size).toFloat()
     }
 
+    /**
+     * Full-file spectrogram (time -> spectrum), one [SpectrumFrame] per analysis window with a
+     * real timestamp. Hop is scaled up for long recordings so the frame count stays around
+     * [targetFrames] — this is for on-screen rendering, not analysis precision.
+     */
+    fun spectrogram(allSamples: ShortArray, sampleRate: Int, targetFrames: Int): List<SpectrumFrame> {
+        if (allSamples.size < windowSize) {
+            return listOf(analyzeWindow(allSamples, sampleRate, 0L))
+        }
+        val hop = maxOf(windowSize / 4, allSamples.size / targetFrames)
+        val frames = mutableListOf<SpectrumFrame>()
+        var offset = 0
+        while (offset + windowSize <= allSamples.size) {
+            val window = allSamples.copyOfRange(offset, offset + windowSize)
+            val timestampMs = (offset.toLong() * 1000) / sampleRate
+            frames.add(analyzeWindow(window, sampleRate, timestampMs))
+            offset += hop
+        }
+        return frames
+    }
+
     /** Averages magnitude spectra over overlapping windows (50% hop) across the whole signal. */
     fun averagedSpectrum(allSamples: ShortArray, sampleRate: Int): AveragedSpectrum {
         val half = fftProcessor.halfSize + 1

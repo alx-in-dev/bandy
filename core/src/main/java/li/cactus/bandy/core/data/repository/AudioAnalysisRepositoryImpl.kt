@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import li.cactus.bandy.core.data.audio.SpectrumAnalyzer
 import li.cactus.bandy.core.data.audio.WavFileReader
 import li.cactus.bandy.core.domain.model.AveragedSpectrum
+import li.cactus.bandy.core.domain.model.SpectrumFrame
 import li.cactus.bandy.core.domain.repository.AudioAnalysisRepository
 
 internal class AudioAnalysisRepositoryImpl : AudioAnalysisRepository {
@@ -14,5 +15,12 @@ internal class AudioAnalysisRepositoryImpl : AudioAnalysisRepository {
             val reader = WavFileReader(File(filePath))
             val samples = reader.readAllSamples()
             SpectrumAnalyzer(fftWindowSize).averagedSpectrum(samples, reader.sampleRate)
+        }
+
+    override suspend fun getSpectrogram(filePath: String, fftWindowSize: Int, targetFrames: Int): List<SpectrumFrame> =
+        withContext(Dispatchers.Default) {
+            val reader = WavFileReader(File(filePath))
+            val samples = reader.readAllSamples()
+            SpectrumAnalyzer(fftWindowSize).spectrogram(samples, reader.sampleRate, targetFrames)
         }
 }
