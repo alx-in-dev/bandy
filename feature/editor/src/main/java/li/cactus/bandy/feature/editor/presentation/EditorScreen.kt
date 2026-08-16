@@ -217,6 +217,11 @@ private fun EditorBody(
 
         HorizontalDivider()
 
+        // Periodicity: isolate a repeating knock/tick from background noise within the selected band
+        PeriodicitySection(state = state, onEvent = onEvent)
+
+        HorizontalDivider()
+
         // Before / After preview
         Text("Прослушивание", style = MaterialTheme.typography.labelLarge)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -279,6 +284,95 @@ private fun EditorBody(
                 Text("Сохранение…")
             } else {
                 Text("Сохранить")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PeriodicitySection(
+    state: EditorScreenState,
+    onEvent: (EditorScreenEvent) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Периодичность (выделить повторяющийся стук)", style = MaterialTheme.typography.labelLarge)
+
+        val band = state.periodicityBand
+        if (band == null) {
+            Text(
+                "Выберите ровно одну полосу выше (клик по полосе), чтобы искать в ней повторяющийся стук",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return
+        }
+
+        OutlinedButton(
+            onClick = { onEvent(EditorScreenEvent.AnalyzePeriodicity) },
+            enabled = !state.isAnalyzingPeriodicity,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (state.isAnalyzingPeriodicity) {
+                CircularProgressIndicator(modifier = Modifier.height(18.dp).width(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Анализ…")
+            } else {
+                Text("Анализировать полосу ${band.lowHz}–${band.highHz} Гц")
+            }
+        }
+
+        val analysis = state.periodicityAnalysis ?: return
+        if (!analysis.isPeriodic) {
+            Text(
+                "Явной периодичности не найдено — попробуйте другую полосу или более длинную запись",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return
+        }
+
+        PeriodicityChart(analysis = analysis)
+        Text(
+            "Период ≈ %.1f мс (%.0f повторов/мин), уверенность %.0f%%, найдено импульсов: %d".format(
+                analysis.periodMs,
+                analysis.cyclesPerMinute,
+                analysis.confidence * 100f,
+                analysis.impulseTimestampsMs.size,
+            ),
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Text("Гармоник в гребенчатом фильтре: ${state.periodicityHarmonics}", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = state.periodicityHarmonics.toFloat(),
+            onValueChange = { onEvent(EditorScreenEvent.PeriodicityHarmonicsChanged(it.toInt())) },
+            valueRange = 1f..12f,
+            steps = 10,
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = {
+                    if (state.isPlayingSyncAverage) {
+                        onEvent(EditorScreenEvent.StopPreview)
+                    } else {
+                        onEvent(EditorScreenEvent.PreviewSynchronousAverage)
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(if (state.isPlayingSyncAverage) "Стоп" else "Прослушать усреднённый цикл")
+            }
+            FilledTonalButton(
+                onClick = { onEvent(EditorScreenEvent.ApplyCombFilter) },
+                enabled = !state.isApplyingPeriodicity,
+                modifier = Modifier.weight(1f),
+            ) {
+                if (state.isApplyingPeriodicity) {
+                    CircularProgressIndicator(modifier = Modifier.height(18.dp).width(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Применить гребенчатый фильтр")
+                }
             }
         }
     }

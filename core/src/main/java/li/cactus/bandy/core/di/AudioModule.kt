@@ -7,13 +7,21 @@ import li.cactus.bandy.core.data.repository.AudioFilterRepositoryImpl
 import li.cactus.bandy.core.data.repository.AudioRecorderControllerImpl
 import li.cactus.bandy.core.data.repository.ExportRepositoryImpl
 import li.cactus.bandy.core.data.repository.LivePreviewPlayerImpl
+import li.cactus.bandy.core.data.repository.PeriodicityRepositoryImpl
 import li.cactus.bandy.core.domain.repository.AudioAnalysisRepository
 import li.cactus.bandy.core.domain.repository.AudioFilterRepository
 import li.cactus.bandy.core.domain.repository.AudioRecorderController
 import li.cactus.bandy.core.domain.repository.ExportRepository
 import li.cactus.bandy.core.domain.repository.LivePreviewPlayer
+import li.cactus.bandy.core.domain.repository.PeriodicityRepository
+import li.cactus.bandy.core.domain.usecase.AnalyzePeriodicityUseCase
+import li.cactus.bandy.core.domain.usecase.AnalyzePeriodicityUseCaseImpl
 import li.cactus.bandy.core.domain.usecase.ApplyBandPassFilterUseCase
 import li.cactus.bandy.core.domain.usecase.ApplyBandPassFilterUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.ApplyCombFilterUseCase
+import li.cactus.bandy.core.domain.usecase.ApplyCombFilterUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCase
+import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCaseImpl
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCaseImpl
 import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCase
@@ -40,6 +48,7 @@ val audioModule = module {
     factoryOf(::AudioFilterRepositoryImpl) bind AudioFilterRepository::class
     factoryOf(::LivePreviewPlayerImpl) bind LivePreviewPlayer::class
     factoryOf(::ExportRepositoryImpl) bind ExportRepository::class
+    factoryOf(::PeriodicityRepositoryImpl) bind PeriodicityRepository::class
 
     factoryOf(::RecordingControlUseCaseImpl) bind RecordingControlUseCase::class
     factoryOf(::ObserveRecordingSessionUseCaseImpl) bind ObserveRecordingSessionUseCase::class
@@ -48,4 +57,7 @@ val audioModule = module {
     factoryOf(::ApplyBandPassFilterUseCaseImpl) bind ApplyBandPassFilterUseCase::class
     factoryOf(::PreviewPlaybackUseCaseImpl) bind PreviewPlaybackUseCase::class
     factoryOf(::ShareRecordingUseCaseImpl) bind ShareRecordingUseCase::class
+    factoryOf(::AnalyzePeriodicityUseCaseImpl) bind AnalyzePeriodicityUseCase::class
+    factoryOf(::ApplyCombFilterUseCaseImpl) bind ApplyCombFilterUseCase::class
+    factoryOf(::BuildSynchronousAverageUseCaseImpl) bind BuildSynchronousAverageUseCase::class
 }

@@ -12,6 +12,9 @@ val editorModule = module {
             getAveragedSpectrumUseCase = get(),
             applyBandPassFilterUseCase = get(),
             previewPlaybackUseCase = get(),
+            analyzePeriodicityUseCase = get(),
+            applyCombFilterUseCase = get(),
+            buildSynchronousAverageUseCase = get(),
         )
     }
 }

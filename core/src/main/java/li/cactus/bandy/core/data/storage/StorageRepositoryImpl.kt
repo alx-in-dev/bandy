@@ -22,6 +22,11 @@ internal class StorageRepositoryImpl(
         return File(recordingsDir(), "sift_$timestamp.$extension")
     }
 
+    override fun newTempFile(extension: String): File {
+        val timestamp = System.currentTimeMillis()
+        return File(context.cacheDir, "sift_tmp_$timestamp.$extension")
+    }
+
     override fun freeSpaceBytes(): Long {
         val stat = StatFs(recordingsDir().path)
         return stat.availableBytes

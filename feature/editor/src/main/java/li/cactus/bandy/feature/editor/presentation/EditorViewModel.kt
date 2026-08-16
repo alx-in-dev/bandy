@@ -4,7 +4,10 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import li.cactus.bandy.core.domain.model.FilterSettings
 import li.cactus.bandy.core.domain.model.FrequencyBand
+import li.cactus.bandy.core.domain.usecase.AnalyzePeriodicityUseCase
 import li.cactus.bandy.core.domain.usecase.ApplyBandPassFilterUseCase
+import li.cactus.bandy.core.domain.usecase.ApplyCombFilterUseCase
+import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCase
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.GetRecordingUseCase
 import li.cactus.bandy.core.domain.usecase.PreviewPlaybackUseCase
@@ -19,6 +22,9 @@ internal class EditorViewModel(
     private val getAveragedSpectrumUseCase: GetAveragedSpectrumUseCase,
     private val applyBandPassFilterUseCase: ApplyBandPassFilterUseCase,
     private val previewPlaybackUseCase: PreviewPlaybackUseCase,
+    private val analyzePeriodicityUseCase: AnalyzePeriodicityUseCase,
+    private val applyCombFilterUseCase: ApplyCombFilterUseCase,
+    private val buildSynchronousAverageUseCase: BuildSynchronousAverageUseCase,
 ) : MVIBaseViewModel<EditorScreenState, EditorScreenAction, EditorScreenEvent>(
     initialState = EditorScreenState(),
 ) {
@@ -56,6 +62,7 @@ internal class EditorViewModel(
                     copy(
                         bands = bands.filterIndexed { i, _ -> i != viewEvent.index },
                         selectedBandIndex = null,
+                        periodicityAnalysis = null,
                     )
                 }
                 restartPreviewIfActive()
@@ -65,7 +72,9 @@ internal class EditorViewModel(
 
             is EditorScreenEvent.BandMoved -> moveBand(viewEvent.index, viewEvent.lowHz)
 
-            is EditorScreenEvent.BandSelected -> setState { copy(selectedBandIndex = viewEvent.index) }
+            is EditorScreenEvent.BandSelected -> setState {
+                copy(selectedBandIndex = viewEvent.index, periodicityAnalysis = null)
+            }
 
             is EditorScreenEvent.ApplyVoicePreset -> setBands(listOf(clampToSpectrum(FrequencyBand.Presets.VOICE)))
 
@@ -74,7 +83,7 @@ internal class EditorViewModel(
             is EditorScreenEvent.ResetBands -> setBands(emptyList())
 
             is EditorScreenEvent.ButterworthOrderChanged -> {
-                setState { copy(butterworthOrder = viewEvent.order.coerceIn(2, 8)) }
+                setState { copy(butterworthOrder = viewEvent.order.coerceIn(2, 8), periodicityAnalysis = null) }
                 restartPreviewIfActive()
             }
 
@@ -90,11 +99,20 @@ internal class EditorViewModel(
             is EditorScreenEvent.Save -> save()
 
             is EditorScreenEvent.StopPreview -> stopPreview()
+
+            is EditorScreenEvent.AnalyzePeriodicity -> analyzePeriodicity()
+
+            is EditorScreenEvent.PeriodicityHarmonicsChanged ->
+                setState { copy(periodicityHarmonics = viewEvent.harmonics.coerceIn(1, 12)) }
+
+            is EditorScreenEvent.ApplyCombFilter -> applyCombFilter()
+
+            is EditorScreenEvent.PreviewSynchronousAverage -> previewSynchronousAverage()
         }
     }
 
     private fun setBands(bands: List<FrequencyBand>) {
-        setState { copy(bands = bands.sortedBy { it.lowHz }) }
+        setState { copy(bands = bands.sortedBy { it.lowHz }, selectedBandIndex = null, periodicityAnalysis = null) }
         restartPreviewIfActive()
     }
 
@@ -121,7 +139,7 @@ internal class EditorViewModel(
         val updated = bands.mapIndexed { i, band ->
             if (i == index) FrequencyBand(clampedLow, clampedHigh) else band
         }
-        setState { copy(bands = updated) }
+        setState { copy(bands = updated, periodicityAnalysis = null) }
         restartPreviewIfActive()
     }
 
@@ -140,7 +158,7 @@ internal class EditorViewModel(
         val newHigh = newLow + width
 
         val updated = bands.mapIndexed { i, b -> if (i == index) FrequencyBand(newLow, newHigh) else b }
-        setState { copy(bands = updated) }
+        setState { copy(bands = updated, periodicityAnalysis = null) }
         restartPreviewIfActive()
     }
 
@@ -153,7 +171,7 @@ internal class EditorViewModel(
             PreviewMode.BEFORE -> previewPlaybackUseCase.play(recording.filePath, null, loop)
             PreviewMode.AFTER -> previewPlaybackUseCase.play(recording.filePath, currentFilterSettings(), loop)
         }
-        setState { copy(previewMode = mode) }
+        setState { copy(previewMode = mode, isPlayingSyncAverage = false) }
     }
 
     /** Bands/order changes only need to restart an active AFTER preview; [alsoRestartBefore] additionally
@@ -167,18 +185,61 @@ internal class EditorViewModel(
 
     private fun stopPreview() {
         previewPlaybackUseCase.stop()
-        setState { copy(previewMode = PreviewMode.OFF) }
+        setState { copy(previewMode = PreviewMode.OFF, isPlayingSyncAverage = false) }
     }
 
     private fun save() {
         val recording = currentState.recording ?: return
         if (currentState.isSaving) return
         previewPlaybackUseCase.stop()
-        setState { copy(previewMode = PreviewMode.OFF, isSaving = true) }
+        setState { copy(previewMode = PreviewMode.OFF, isPlayingSyncAverage = false, isSaving = true) }
         viewModelScope.launch {
             applyBandPassFilterUseCase(recording, currentFilterSettings(), currentState.alsoExportAac)
             setState { copy(isSaving = false) }
             sendAction(EditorScreenAction.NavigateToLibrary)
+        }
+    }
+
+    private fun analyzePeriodicity() {
+        val recording = currentState.recording ?: return
+        val band = currentState.periodicityBand ?: return
+        if (currentState.isAnalyzingPeriodicity) return
+        setState { copy(isAnalyzingPeriodicity = true, periodicityAnalysis = null) }
+        viewModelScope.launch {
+            val analysis = analyzePeriodicityUseCase(recording.filePath, band, currentState.butterworthOrder)
+            setState { copy(isAnalyzingPeriodicity = false, periodicityAnalysis = analysis) }
+        }
+    }
+
+    private fun applyCombFilter() {
+        val recording = currentState.recording ?: return
+        val band = currentState.periodicityBand ?: return
+        val analysis = currentState.periodicityAnalysis?.takeIf { it.isPeriodic } ?: return
+        if (currentState.isApplyingPeriodicity) return
+        previewPlaybackUseCase.stop()
+        setState { copy(previewMode = PreviewMode.OFF, isPlayingSyncAverage = false, isApplyingPeriodicity = true) }
+        viewModelScope.launch {
+            applyCombFilterUseCase(
+                recording,
+                band,
+                currentState.butterworthOrder,
+                analysis.periodMs,
+                currentState.periodicityHarmonics,
+            )
+            setState { copy(isApplyingPeriodicity = false) }
+            sendAction(EditorScreenAction.NavigateToLibrary)
+        }
+    }
+
+    private fun previewSynchronousAverage() {
+        val recording = currentState.recording ?: return
+        val band = currentState.periodicityBand ?: return
+        val analysis = currentState.periodicityAnalysis?.takeIf { it.isPeriodic } ?: return
+        viewModelScope.launch {
+            val path = buildSynchronousAverageUseCase(recording, band, currentState.butterworthOrder, analysis)
+            previewPlaybackUseCase.stop()
+            previewPlaybackUseCase.play(path, null, loop = true)
+            setState { copy(previewMode = PreviewMode.OFF, isPlayingSyncAverage = true) }
         }
     }
 

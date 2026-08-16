@@ -2,6 +2,7 @@ package li.cactus.bandy.feature.editor.presentation
 
 import li.cactus.bandy.core.domain.model.AveragedSpectrum
 import li.cactus.bandy.core.domain.model.FrequencyBand
+import li.cactus.bandy.core.domain.model.PeriodicityAnalysis
 import li.cactus.bandy.core.domain.model.Recording
 
 enum class FreqScale { LINEAR, LOG }
@@ -21,9 +22,17 @@ data class EditorScreenState(
     val loopPreview: Boolean = false,
     val alsoExportAac: Boolean = false,
     val isSaving: Boolean = false,
+    val periodicityAnalysis: PeriodicityAnalysis? = null,
+    val isAnalyzingPeriodicity: Boolean = false,
+    val isApplyingPeriodicity: Boolean = false,
+    val isPlayingSyncAverage: Boolean = false,
+    val periodicityHarmonics: Int = 6,
 ) {
     val nyquistHz: Int get() = (recording?.sampleRate ?: 0) / 2
     val canSave: Boolean get() = recording != null && !isSaving
+
+    /** Periodicity tools operate on exactly one band: the selected one, or the only one if there's just one. */
+    val periodicityBand: FrequencyBand? get() = selectedBandIndex?.let { bands.getOrNull(it) } ?: bands.singleOrNull()
 }
 
 sealed interface EditorScreenEvent {
@@ -42,6 +51,10 @@ sealed interface EditorScreenEvent {
     data class AlsoExportAacChanged(val enabled: Boolean) : EditorScreenEvent
     data object Save : EditorScreenEvent
     data object StopPreview : EditorScreenEvent
+    data object AnalyzePeriodicity : EditorScreenEvent
+    data class PeriodicityHarmonicsChanged(val harmonics: Int) : EditorScreenEvent
+    data object ApplyCombFilter : EditorScreenEvent
+    data object PreviewSynchronousAverage : EditorScreenEvent
 }
 
 sealed interface EditorScreenAction {
