@@ -10,9 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import li.cactus.bandy.core.navigation.NavigationConstants
 import li.cactus.bandy.core.navigation.rememberNavigationState
-import li.cactus.bandy.feature.editor.navigation.editorScreen
+import li.cactus.bandy.feature.editor.navigation.workspaceScreen
 import li.cactus.bandy.feature.library.libraryScreen
-import li.cactus.bandy.feature.record.navigation.recordScreen
 import li.cactus.bandy.ui.theme.BandyTheme
 
 class MainActivity : ComponentActivity() {
@@ -32,11 +31,10 @@ private fun SiftApp() {
     val navigationState = rememberNavigationState()
     NavHost(
         navController = navigationState.navController,
-        startDestination = NavigationConstants.Route.RECORD,
+        startDestination = NavigationConstants.Route.LIBRARY,
         modifier = Modifier.fillMaxSize(),
     ) {
-        recordScreen(navigationState)
-        editorScreen(navigationState)
         libraryScreen(navigationState)
+        workspaceScreen(navigationState)
     }
 }

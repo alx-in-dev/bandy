@@ -18,10 +18,10 @@ fun LibraryScreen(navigationState: NavigationState) {
     CollectActions(viewModel) { action ->
         when (action) {
             is LibraryScreenAction.NavigateToEditor ->
-                navigationState.navigateToEditor(action.recordingId)
+                navigationState.navigateToWorkspace(action.recordingId)
 
             LibraryScreenAction.NavigateToRecord ->
-                navigationState.navigateToRecord()
+                navigationState.navigateToNewRecording()
 
             is LibraryScreenAction.ShareRecording -> {
                 val sendIntent = Intent(Intent.ACTION_SEND).apply {

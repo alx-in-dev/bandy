@@ -25,7 +25,6 @@ dependencyResolutionManagement {
 rootProject.name = "Bandy"
 include(":app")
 include(":core")
-include(":feature:record")
 include(":feature:editor")
 include(":feature:library")
  

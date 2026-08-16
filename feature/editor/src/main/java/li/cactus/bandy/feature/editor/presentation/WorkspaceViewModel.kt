@@ -1,23 +1,45 @@
 package li.cactus.bandy.feature.editor.presentation
 
 import androidx.lifecycle.viewModelScope
+import kotlin.math.ln
+import kotlin.math.max
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import li.cactus.bandy.core.domain.model.FilterSettings
 import li.cactus.bandy.core.domain.model.FrequencyBand
+import li.cactus.bandy.core.domain.model.Recording
+import li.cactus.bandy.core.domain.model.SpectrumFrame
 import li.cactus.bandy.core.domain.usecase.AnalyzePeriodicityUseCase
 import li.cactus.bandy.core.domain.usecase.ApplyBandPassFilterUseCase
 import li.cactus.bandy.core.domain.usecase.ApplyCombFilterUseCase
 import li.cactus.bandy.core.domain.usecase.BuildSynchronousAverageUseCase
 import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCase
 import li.cactus.bandy.core.domain.usecase.GetRecordingUseCase
+import li.cactus.bandy.core.domain.usecase.ObserveAudioSettingsUseCase
+import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCase
+import li.cactus.bandy.core.domain.usecase.ObserveRecordingSessionUseCase
 import li.cactus.bandy.core.domain.usecase.PreviewPlaybackUseCase
+import li.cactus.bandy.core.domain.usecase.RecordingControlUseCase
+import li.cactus.bandy.core.domain.usecase.UpdateAudioSettingsUseCase
 import li.cactus.bandy.core.mvi.MVIBaseViewModel
 
 private const val FFT_WINDOW_SIZE = 2048
 private const val MIN_BAND_WIDTH_HZ = 20
+private const val MAX_WATERFALL_FRAMES = 150
+private const val WATERFALL_COLUMNS = 128
+private const val PEAK_DECAY = 0.999f
 
-internal class EditorViewModel(
-    private val recordingId: Long,
+/** [initialRecordingId] < 0 starts fresh in the recording phase; >= 0 opens directly in the
+ * editing phase for that existing recording (re-filter flow from the library). */
+internal class WorkspaceViewModel(
+    private val initialRecordingId: Long,
+    private val recordingControl: RecordingControlUseCase,
+    observeSession: ObserveRecordingSessionUseCase,
+    observeLiveSpectrum: ObserveLiveSpectrumUseCase,
+    observeAudioSettings: ObserveAudioSettingsUseCase,
+    private val updateAudioSettings: UpdateAudioSettingsUseCase,
     private val getRecordingUseCase: GetRecordingUseCase,
     private val getAveragedSpectrumUseCase: GetAveragedSpectrumUseCase,
     private val applyBandPassFilterUseCase: ApplyBandPassFilterUseCase,
@@ -25,12 +47,32 @@ internal class EditorViewModel(
     private val analyzePeriodicityUseCase: AnalyzePeriodicityUseCase,
     private val applyCombFilterUseCase: ApplyCombFilterUseCase,
     private val buildSynchronousAverageUseCase: BuildSynchronousAverageUseCase,
-) : MVIBaseViewModel<EditorScreenState, EditorScreenAction, EditorScreenEvent>(
-    initialState = EditorScreenState(),
+) : MVIBaseViewModel<WorkspaceScreenState, WorkspaceScreenAction, WorkspaceScreenEvent>(
+    initialState = WorkspaceScreenState(
+        phase = if (initialRecordingId >= 0) WorkspacePhase.EDITING else WorkspacePhase.RECORDING,
+    ),
 ) {
 
+    private val ring = ArrayDeque<FloatArray>(MAX_WATERFALL_FRAMES)
+    private var spectrumPeak = 1f
+
+    private val _spectrumFrames = MutableStateFlow<List<FloatArray>>(emptyList())
+    val spectrumFrames: StateFlow<List<FloatArray>> = _spectrumFrames.asStateFlow()
+
     init {
-        loadData()
+        if (initialRecordingId >= 0) {
+            loadRecordingForEditing(initialRecordingId)
+        } else {
+            viewModelScope.launch {
+                observeSession().collect { session -> setState { copy(session = session) } }
+            }
+            viewModelScope.launch {
+                observeAudioSettings().collect { settings -> setState { copy(audioSettings = settings) } }
+            }
+            viewModelScope.launch {
+                observeLiveSpectrum().collect { frame -> pushSpectrum(frame) }
+            }
+        }
         // The player is shared across screens (e.g. library quick-play) — if something else
         // stops or takes over playback, drop our stale "now playing" UI state too.
         viewModelScope.launch {
@@ -42,31 +84,27 @@ internal class EditorViewModel(
         }
     }
 
-    private fun loadData() {
-        viewModelScope.launch {
-            val recording = getRecordingUseCase(recordingId)
-            if (recording == null) {
-                setState { copy(isLoading = false, errorLoading = true) }
-                return@launch
-            }
-            setState {
-                copy(
-                    recording = recording,
-                    bands = recording.appliedBands.sortedBy { it.lowHz },
-                )
-            }
-            val spectrum = getAveragedSpectrumUseCase(recording.filePath, FFT_WINDOW_SIZE)
-            setState { copy(isLoading = false, spectrum = spectrum) }
-        }
-    }
-
-    override fun obtainEvent(viewEvent: EditorScreenEvent) {
+    override fun obtainEvent(viewEvent: WorkspaceScreenEvent) {
         when (viewEvent) {
-            is EditorScreenEvent.ScaleChanged -> setState { copy(scale = viewEvent.scale) }
+            WorkspaceScreenEvent.OnStartClick -> onStart()
+            WorkspaceScreenEvent.OnPauseClick -> recordingControl.pause()
+            WorkspaceScreenEvent.OnResumeClick -> recordingControl.resume()
+            WorkspaceScreenEvent.OnStopClick -> onStop()
+            WorkspaceScreenEvent.OnPermissionDenied -> setState { copy(permissionDenied = true) }
+            WorkspaceScreenEvent.OnOpenSettings -> setState { copy(isSettingsSheetOpen = true) }
+            WorkspaceScreenEvent.OnCloseSettings -> setState { copy(isSettingsSheetOpen = false) }
+            is WorkspaceScreenEvent.OnSampleRateSelected -> viewModelScope.launch {
+                updateAudioSettings.setSampleRate(viewEvent.option)
+            }
+            is WorkspaceScreenEvent.OnFftWindowSelected -> viewModelScope.launch {
+                updateAudioSettings.setFftWindowSize(viewEvent.size)
+            }
 
-            is EditorScreenEvent.AddBand -> addBand()
+            is WorkspaceScreenEvent.ScaleChanged -> setState { copy(scale = viewEvent.scale) }
 
-            is EditorScreenEvent.RemoveBand -> {
+            is WorkspaceScreenEvent.AddBand -> addBand()
+
+            is WorkspaceScreenEvent.RemoveBand -> {
                 setState {
                     copy(
                         bands = bands.filterIndexed { i, _ -> i != viewEvent.index },
@@ -77,46 +115,130 @@ internal class EditorViewModel(
                 restartPreviewIfActive()
             }
 
-            is EditorScreenEvent.BandChanged -> changeBand(viewEvent.index, viewEvent.lowHz, viewEvent.highHz)
+            is WorkspaceScreenEvent.BandChanged -> changeBand(viewEvent.index, viewEvent.lowHz, viewEvent.highHz)
 
-            is EditorScreenEvent.BandMoved -> moveBand(viewEvent.index, viewEvent.lowHz)
+            is WorkspaceScreenEvent.BandMoved -> moveBand(viewEvent.index, viewEvent.lowHz)
 
-            is EditorScreenEvent.BandSelected -> setState {
+            is WorkspaceScreenEvent.BandSelected -> setState {
                 copy(selectedBandIndex = viewEvent.index, periodicityAnalysis = null)
             }
 
-            is EditorScreenEvent.ApplyVoicePreset -> setBands(listOf(clampToSpectrum(FrequencyBand.Presets.VOICE)))
+            is WorkspaceScreenEvent.ApplyVoicePreset -> setBands(listOf(clampToSpectrum(FrequencyBand.Presets.VOICE)))
 
-            is EditorScreenEvent.ApplyBassPreset -> setBands(listOf(clampToSpectrum(FrequencyBand.Presets.BASS)))
+            is WorkspaceScreenEvent.ApplyBassPreset -> setBands(listOf(clampToSpectrum(FrequencyBand.Presets.BASS)))
 
-            is EditorScreenEvent.ResetBands -> setBands(emptyList())
+            is WorkspaceScreenEvent.ResetBands -> setBands(emptyList())
 
-            is EditorScreenEvent.ButterworthOrderChanged -> {
+            is WorkspaceScreenEvent.ButterworthOrderChanged -> {
                 setState { copy(butterworthOrder = viewEvent.order.coerceIn(2, 8), periodicityAnalysis = null) }
                 restartPreviewIfActive()
             }
 
-            is EditorScreenEvent.PreviewModeChanged -> setPreviewMode(viewEvent.mode)
+            is WorkspaceScreenEvent.PreviewModeChanged -> setPreviewMode(viewEvent.mode)
 
-            is EditorScreenEvent.LoopPreviewChanged -> {
+            is WorkspaceScreenEvent.LoopPreviewChanged -> {
                 setState { copy(loopPreview = viewEvent.enabled) }
                 restartPreviewIfActive(alsoRestartBefore = true)
             }
 
-            is EditorScreenEvent.AlsoExportAacChanged -> setState { copy(alsoExportAac = viewEvent.enabled) }
+            is WorkspaceScreenEvent.AlsoExportAacChanged -> setState { copy(alsoExportAac = viewEvent.enabled) }
 
-            is EditorScreenEvent.Save -> save()
+            is WorkspaceScreenEvent.Save -> save()
 
-            is EditorScreenEvent.StopPreview -> stopPreview()
+            is WorkspaceScreenEvent.StopPreview -> stopPreview()
 
-            is EditorScreenEvent.AnalyzePeriodicity -> analyzePeriodicity()
+            is WorkspaceScreenEvent.AnalyzePeriodicity -> analyzePeriodicity()
 
-            is EditorScreenEvent.PeriodicityHarmonicsChanged ->
+            is WorkspaceScreenEvent.PeriodicityHarmonicsChanged ->
                 setState { copy(periodicityHarmonics = viewEvent.harmonics.coerceIn(1, 12)) }
 
-            is EditorScreenEvent.ApplyCombFilter -> applyCombFilter()
+            is WorkspaceScreenEvent.ApplyCombFilter -> applyCombFilter()
 
-            is EditorScreenEvent.PreviewSynchronousAverage -> previewSynchronousAverage()
+            is WorkspaceScreenEvent.PreviewSynchronousAverage -> previewSynchronousAverage()
+        }
+    }
+
+    // ---- Recording phase ----
+
+    private fun onStart() {
+        setState { copy(permissionDenied = false) }
+        clearSpectrum()
+        viewModelScope.launch { recordingControl.start() }
+    }
+
+    private fun onStop() {
+        viewModelScope.launch {
+            val recording = recordingControl.stop()
+            clearSpectrum()
+            enterEditingPhase(recording)
+        }
+    }
+
+    private fun pushSpectrum(frame: SpectrumFrame) {
+        val column = bucketToColumns(frame.magnitudes)
+        var frameMax = 0f
+        for (v in column) frameMax = max(frameMax, v)
+        spectrumPeak = max(spectrumPeak * PEAK_DECAY, frameMax).coerceAtLeast(1e-6f)
+
+        val denom = ln(1f + spectrumPeak)
+        val normalized = FloatArray(column.size) { i ->
+            (ln(1f + column[i]) / denom).coerceIn(0f, 1f)
+        }
+        if (ring.size >= MAX_WATERFALL_FRAMES) ring.removeFirst()
+        ring.addLast(normalized)
+        _spectrumFrames.value = ring.toList()
+    }
+
+    private fun clearSpectrum() {
+        ring.clear()
+        spectrumPeak = 1f
+        _spectrumFrames.value = emptyList()
+    }
+
+    private fun bucketToColumns(magnitudes: FloatArray): FloatArray {
+        if (magnitudes.isEmpty()) return FloatArray(WATERFALL_COLUMNS)
+        val out = FloatArray(WATERFALL_COLUMNS)
+        val bins = magnitudes.size
+        for (c in 0 until WATERFALL_COLUMNS) {
+            val start = (c.toLong() * bins / WATERFALL_COLUMNS).toInt()
+            val end = ((c + 1).toLong() * bins / WATERFALL_COLUMNS).toInt().coerceAtLeast(start + 1)
+            var m = 0f
+            var i = start
+            while (i < end && i < bins) {
+                m = max(m, magnitudes[i])
+                i++
+            }
+            out[c] = m
+        }
+        return out
+    }
+
+    // ---- Editing phase ----
+
+    private fun loadRecordingForEditing(id: Long) {
+        setState { copy(isLoading = true) }
+        viewModelScope.launch {
+            val recording = getRecordingUseCase(id)
+            if (recording == null) {
+                setState { copy(isLoading = false, errorLoading = true) }
+                return@launch
+            }
+            enterEditingPhase(recording)
+        }
+    }
+
+    private fun enterEditingPhase(recording: Recording) {
+        setState {
+            copy(
+                phase = WorkspacePhase.EDITING,
+                recording = recording,
+                bands = recording.appliedBands.sortedBy { it.lowHz },
+                isLoading = true,
+            )
+        }
+        viewModelScope.launch {
+            val spectrum = getAveragedSpectrumUseCase(recording.filePath, FFT_WINDOW_SIZE)
+            setState { copy(isLoading = false, spectrum = spectrum) }
         }
     }
 
@@ -205,7 +327,7 @@ internal class EditorViewModel(
         viewModelScope.launch {
             applyBandPassFilterUseCase(recording, currentFilterSettings(), currentState.alsoExportAac)
             setState { copy(isSaving = false) }
-            sendAction(EditorScreenAction.NavigateToLibrary)
+            sendAction(WorkspaceScreenAction.NavigateToLibrary)
         }
     }
 
@@ -236,7 +358,7 @@ internal class EditorViewModel(
                 currentState.periodicityHarmonics,
             )
             setState { copy(isApplyingPeriodicity = false) }
-            sendAction(EditorScreenAction.NavigateToLibrary)
+            sendAction(WorkspaceScreenAction.NavigateToLibrary)
         }
     }
 

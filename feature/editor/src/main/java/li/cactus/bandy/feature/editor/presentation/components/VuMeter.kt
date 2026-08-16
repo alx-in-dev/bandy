@@ -1,4 +1,4 @@
-package li.cactus.bandy.feature.record.presentation.components
+package li.cactus.bandy.feature.editor.presentation.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth

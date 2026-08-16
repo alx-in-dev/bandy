@@ -5,7 +5,6 @@ import li.cactus.bandy.core.di.appModule
 import li.cactus.bandy.core.di.audioModule
 import li.cactus.bandy.feature.editor.di.editorModule
 import li.cactus.bandy.feature.library.di.libraryModule
-import li.cactus.bandy.feature.record.di.recordModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
@@ -16,7 +15,7 @@ class SiftApplication : Application() {
         startKoin {
             androidLogger()
             androidContext(this@SiftApplication)
-            modules(appModule, audioModule, recordModule, editorModule, libraryModule)
+            modules(appModule, audioModule, editorModule, libraryModule)
         }
     }
 }

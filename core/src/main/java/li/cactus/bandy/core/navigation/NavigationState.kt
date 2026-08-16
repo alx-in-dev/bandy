@@ -11,14 +11,14 @@ class NavigationState(val navController: NavHostController) {
         navController.navigate(NavigationConstants.Route.LIBRARY)
     }
 
-    fun navigateToRecord() {
-        navController.navigate(NavigationConstants.Route.RECORD) {
-            popUpTo(NavigationConstants.Route.RECORD) { inclusive = false }
-        }
+    /** Opens the merged record+edit screen fresh, for a new recording. */
+    fun navigateToNewRecording() {
+        navController.navigate(NavigationConstants.Route.WORKSPACE_NEW)
     }
 
-    fun navigateToEditor(recordingId: Long) {
-        navController.navigate(NavigationConstants.Route.editor(recordingId))
+    /** Opens the merged record+edit screen directly in editing mode for an existing recording. */
+    fun navigateToWorkspace(recordingId: Long) {
+        navController.navigate(NavigationConstants.Route.workspace(recordingId))
     }
 
     fun navigateBack() {

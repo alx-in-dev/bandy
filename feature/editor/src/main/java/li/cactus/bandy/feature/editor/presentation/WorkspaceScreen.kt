@@ -1,5 +1,10 @@
 package li.cactus.bandy.feature.editor.presentation
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,18 +15,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,56 +49,332 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.koin.androidx.compose.koinViewModel
-import org.koin.core.parameter.parametersOf
-import androidx.compose.runtime.DisposableEffect
 import li.cactus.bandy.core.domain.model.FrequencyBand
+import li.cactus.bandy.core.domain.model.RecordingPhase
 import li.cactus.bandy.core.mvi.CollectActions
 import li.cactus.bandy.core.navigation.NavigationState
+import li.cactus.bandy.feature.editor.presentation.components.SettingsSheet
+import li.cactus.bandy.feature.editor.presentation.components.SpectrumWaterfall
+import li.cactus.bandy.feature.editor.presentation.components.VuMeter
+import org.koin.androidx.compose.koinViewModel
+import org.koin.core.parameter.parametersOf
 
+private const val WATERFALL_MAX_ROWS = 150
+
+private val requiredPermissions: Array<String>
+    get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+    } else {
+        arrayOf(Manifest.permission.RECORD_AUDIO)
+    }
+
+/** [recordingId] null starts a fresh recording; non-null opens directly in editing mode for that recording. */
 @Composable
-fun EditorScreen(recordingId: Long, navigationState: NavigationState) {
-    val viewModel = koinViewModel<EditorViewModel>(parameters = { parametersOf(recordingId) })
+fun WorkspaceScreen(recordingId: Long?, navigationState: NavigationState) {
+    val viewModel = koinViewModel<WorkspaceViewModel>(parameters = { parametersOf(recordingId ?: -1L) })
     val state by viewModel.getViewState().collectAsStateWithLifecycle()
+    val spectrumFrames by viewModel.spectrumFrames.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val recordGranted = grants[Manifest.permission.RECORD_AUDIO] == true
+        if (recordGranted) {
+            viewModel.obtainEvent(WorkspaceScreenEvent.OnStartClick)
+        } else {
+            viewModel.obtainEvent(WorkspaceScreenEvent.OnPermissionDenied)
+        }
+    }
+
+    val requestStart: () -> Unit = {
+        val recordGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (recordGranted) {
+            viewModel.obtainEvent(WorkspaceScreenEvent.OnStartClick)
+        } else {
+            permissionLauncher.launch(requiredPermissions)
+        }
+    }
 
     CollectActions(viewModel) { action ->
         when (action) {
-            is EditorScreenAction.NavigateToLibrary -> navigationState.navigateToLibrary()
+            is WorkspaceScreenAction.NavigateToLibrary -> navigationState.navigateToLibrary()
         }
     }
 
     DisposableEffect(Unit) {
-        onDispose { viewModel.obtainEvent(EditorScreenEvent.StopPreview) }
+        onDispose { viewModel.obtainEvent(WorkspaceScreenEvent.StopPreview) }
     }
 
-    EditorScreenContent(
+    WorkspaceScreenContent(
         state = state,
+        spectrumFrames = spectrumFrames,
+        onStartRecording = requestStart,
         onEvent = viewModel::obtainEvent,
         onBack = navigationState::navigateBack,
     )
+
+    if (state.isSettingsSheetOpen) {
+        SettingsSheet(
+            settings = state.audioSettings,
+            onSampleRateSelected = { viewModel.obtainEvent(WorkspaceScreenEvent.OnSampleRateSelected(it)) },
+            onFftWindowSelected = { viewModel.obtainEvent(WorkspaceScreenEvent.OnFftWindowSelected(it)) },
+            onDismiss = { viewModel.obtainEvent(WorkspaceScreenEvent.OnCloseSettings) },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun EditorScreenContent(
-    state: EditorScreenState,
-    onEvent: (EditorScreenEvent) -> Unit,
+internal fun WorkspaceScreenContent(
+    state: WorkspaceScreenState,
+    spectrumFrames: List<FloatArray>,
+    onStartRecording: () -> Unit,
+    onEvent: (WorkspaceScreenEvent) -> Unit,
+    onBack: () -> Unit,
+) {
+    when (state.phase) {
+        WorkspacePhase.RECORDING -> RecordingPhaseScaffold(
+            state = state,
+            spectrumFrames = spectrumFrames,
+            onStartRecording = onStartRecording,
+            onEvent = onEvent,
+            onBack = onBack,
+        )
+        WorkspacePhase.EDITING -> EditingPhaseScaffold(
+            state = state,
+            onEvent = onEvent,
+            onBack = onBack,
+        )
+    }
+}
+
+// ==================== Recording phase ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecordingPhaseScaffold(
+    state: WorkspaceScreenState,
+    spectrumFrames: List<FloatArray>,
+    onStartRecording: () -> Unit,
+    onEvent: (WorkspaceScreenEvent) -> Unit,
+    onBack: () -> Unit,
+) {
+    val phase = state.session.phase
+    val isIdle = phase == RecordingPhase.IDLE
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Запись") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    if (isIdle) {
+                        IconButton(onClick = { onEvent(WorkspaceScreenEvent.OnOpenSettings) }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Настройки")
+                        }
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (state.session.lowStorageWarning) {
+                LowStorageBanner()
+            }
+
+            Text(
+                text = formatElapsed(state.session.elapsedMs),
+                style = MaterialTheme.typography.displaySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+
+            VuMeter(
+                level = state.session.vuLevel,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            SpectrumWaterfall(
+                frames = spectrumFrames,
+                maxRows = WATERFALL_MAX_ROWS,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(
+                        color = Color(0xFF0D1B3E),
+                        shape = RoundedCornerShape(12.dp),
+                    ),
+            )
+
+            if (state.permissionDenied) {
+                PermissionDenied(onRequest = onStartRecording)
+            }
+
+            RecordingControls(
+                phase = phase,
+                onStartRecording = onStartRecording,
+                onEvent = onEvent,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordingControls(
+    phase: RecordingPhase,
+    onStartRecording: () -> Unit,
+    onEvent: (WorkspaceScreenEvent) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when (phase) {
+            RecordingPhase.IDLE -> {
+                FilledIconButton(
+                    onClick = onStartRecording,
+                    modifier = Modifier.size(72.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.FiberManualRecord,
+                        contentDescription = "Записать",
+                        tint = Color(0xFFE53935),
+                    )
+                }
+            }
+            RecordingPhase.RECORDING -> {
+                FilledIconButton(
+                    onClick = { onEvent(WorkspaceScreenEvent.OnPauseClick) },
+                    modifier = Modifier.size(64.dp),
+                ) {
+                    Icon(Icons.Filled.Pause, contentDescription = "Пауза")
+                }
+                RecordingStopButton(onEvent)
+            }
+            RecordingPhase.PAUSED -> {
+                FilledIconButton(
+                    onClick = { onEvent(WorkspaceScreenEvent.OnResumeClick) },
+                    modifier = Modifier.size(64.dp),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Продолжить")
+                }
+                RecordingStopButton(onEvent)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordingStopButton(onEvent: (WorkspaceScreenEvent) -> Unit) {
+    FilledIconButton(
+        onClick = { onEvent(WorkspaceScreenEvent.OnStopClick) },
+        modifier = Modifier.size(64.dp),
+    ) {
+        Icon(Icons.Filled.Stop, contentDescription = "Остановить")
+    }
+}
+
+@Composable
+private fun LowStorageBanner() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .background(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        Text(
+            text = "Мало места на устройстве",
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(start = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun PermissionDenied(onRequest: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "Для записи нужен доступ к микрофону",
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.error,
+        )
+        OutlinedButton(
+            onClick = onRequest,
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Text("Разрешить")
+        }
+    }
+}
+
+private fun formatElapsed(elapsedMs: Long): String {
+    val totalSeconds = elapsedMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
+}
+
+// ==================== Editing phase ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditingPhaseScaffold(
+    state: WorkspaceScreenState,
+    onEvent: (WorkspaceScreenEvent) -> Unit,
     onBack: () -> Unit,
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.recording?.title ?: "Editor") },
+                title = { Text(state.recording?.title ?: "Редактор") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
                     }
                 },
             )
@@ -96,7 +384,7 @@ internal fun EditorScreenContent(
             state.isLoading -> LoadingState(Modifier.fillMaxSize().padding(padding))
             state.errorLoading || state.recording == null || state.spectrum == null ->
                 ErrorState(Modifier.fillMaxSize().padding(padding))
-            else -> EditorBody(
+            else -> EditingBody(
                 state = state,
                 onEvent = onEvent,
                 modifier = Modifier
@@ -125,9 +413,9 @@ private fun ErrorState(modifier: Modifier) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditorBody(
-    state: EditorScreenState,
-    onEvent: (EditorScreenEvent) -> Unit,
+private fun EditingBody(
+    state: WorkspaceScreenState,
+    onEvent: (WorkspaceScreenEvent) -> Unit,
     modifier: Modifier,
 ) {
     val spectrum = state.spectrum ?: return
@@ -139,12 +427,12 @@ private fun EditorBody(
             SingleChoiceSegmentedButtonRow {
                 SegmentedButton(
                     selected = state.scale == FreqScale.LOG,
-                    onClick = { onEvent(EditorScreenEvent.ScaleChanged(FreqScale.LOG)) },
+                    onClick = { onEvent(WorkspaceScreenEvent.ScaleChanged(FreqScale.LOG)) },
                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                 ) { Text("Лог") }
                 SegmentedButton(
                     selected = state.scale == FreqScale.LINEAR,
-                    onClick = { onEvent(EditorScreenEvent.ScaleChanged(FreqScale.LINEAR)) },
+                    onClick = { onEvent(WorkspaceScreenEvent.ScaleChanged(FreqScale.LINEAR)) },
                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                 ) { Text("Линейн") }
             }
@@ -156,13 +444,13 @@ private fun EditorBody(
             selectedIndex = state.selectedBandIndex,
             scale = state.scale,
             onBandChanged = { index, low, high ->
-                onEvent(EditorScreenEvent.BandChanged(index, low, high))
+                onEvent(WorkspaceScreenEvent.BandChanged(index, low, high))
             },
             onBandMoved = { index, low ->
-                onEvent(EditorScreenEvent.BandMoved(index, low))
+                onEvent(WorkspaceScreenEvent.BandMoved(index, low))
             },
             onBandSelected = { index ->
-                onEvent(EditorScreenEvent.BandSelected(index))
+                onEvent(WorkspaceScreenEvent.BandSelected(index))
             },
         )
         if (state.bands.isNotEmpty()) {
@@ -175,9 +463,9 @@ private fun EditorBody(
 
         // Presets + add band
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { onEvent(EditorScreenEvent.ApplyVoicePreset) }) { Text("Голос") }
-            FilledTonalButton(onClick = { onEvent(EditorScreenEvent.ApplyBassPreset) }) { Text("Бас") }
-            OutlinedButton(onClick = { onEvent(EditorScreenEvent.ResetBands) }) { Text("Сброс") }
+            FilledTonalButton(onClick = { onEvent(WorkspaceScreenEvent.ApplyVoicePreset) }) { Text("Голос") }
+            FilledTonalButton(onClick = { onEvent(WorkspaceScreenEvent.ApplyBassPreset) }) { Text("Бас") }
+            OutlinedButton(onClick = { onEvent(WorkspaceScreenEvent.ResetBands) }) { Text("Сброс") }
         }
 
         Row(
@@ -186,7 +474,7 @@ private fun EditorBody(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Полосы (${state.bands.size})", style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = { onEvent(EditorScreenEvent.AddBand) }) {
+            OutlinedButton(onClick = { onEvent(WorkspaceScreenEvent.AddBand) }) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text("Добавить")
@@ -200,8 +488,8 @@ private fun EditorBody(
                 BandRow(
                     band = band,
                     selected = index == state.selectedBandIndex,
-                    onSelect = { onEvent(EditorScreenEvent.BandSelected(index)) },
-                    onRemove = { onEvent(EditorScreenEvent.RemoveBand(index)) },
+                    onSelect = { onEvent(WorkspaceScreenEvent.BandSelected(index)) },
+                    onRemove = { onEvent(WorkspaceScreenEvent.RemoveBand(index)) },
                 )
             }
         }
@@ -212,7 +500,7 @@ private fun EditorBody(
         Text("Порядок Butterworth: ${state.butterworthOrder}", style = MaterialTheme.typography.labelLarge)
         Slider(
             value = state.butterworthOrder.toFloat(),
-            onValueChange = { onEvent(EditorScreenEvent.ButterworthOrderChanged(it.toInt())) },
+            onValueChange = { onEvent(WorkspaceScreenEvent.ButterworthOrderChanged(it.toInt())) },
             valueRange = 2f..8f,
             steps = 5,
         )
@@ -232,7 +520,7 @@ private fun EditorBody(
                 playing = state.previewMode == PreviewMode.BEFORE,
                 onClick = {
                     val target = if (state.previewMode == PreviewMode.BEFORE) PreviewMode.OFF else PreviewMode.BEFORE
-                    onEvent(EditorScreenEvent.PreviewModeChanged(target))
+                    onEvent(WorkspaceScreenEvent.PreviewModeChanged(target))
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -241,7 +529,7 @@ private fun EditorBody(
                 playing = state.previewMode == PreviewMode.AFTER,
                 onClick = {
                     val target = if (state.previewMode == PreviewMode.AFTER) PreviewMode.OFF else PreviewMode.AFTER
-                    onEvent(EditorScreenEvent.PreviewModeChanged(target))
+                    onEvent(WorkspaceScreenEvent.PreviewModeChanged(target))
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -255,7 +543,7 @@ private fun EditorBody(
             Text("Зациклить воспроизведение")
             Switch(
                 checked = state.loopPreview,
-                onCheckedChange = { onEvent(EditorScreenEvent.LoopPreviewChanged(it)) },
+                onCheckedChange = { onEvent(WorkspaceScreenEvent.LoopPreviewChanged(it)) },
             )
         }
 
@@ -270,13 +558,13 @@ private fun EditorBody(
             Text("Также экспортировать в AAC")
             Switch(
                 checked = state.alsoExportAac,
-                onCheckedChange = { onEvent(EditorScreenEvent.AlsoExportAacChanged(it)) },
+                onCheckedChange = { onEvent(WorkspaceScreenEvent.AlsoExportAacChanged(it)) },
                 enabled = !state.isSaving,
             )
         }
 
         Button(
-            onClick = { onEvent(EditorScreenEvent.Save) },
+            onClick = { onEvent(WorkspaceScreenEvent.Save) },
             enabled = state.canSave,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -318,8 +606,8 @@ private fun PlayToggleButton(
 
 @Composable
 private fun PeriodicitySection(
-    state: EditorScreenState,
-    onEvent: (EditorScreenEvent) -> Unit,
+    state: WorkspaceScreenState,
+    onEvent: (WorkspaceScreenEvent) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Периодичность (выделить повторяющийся стук)", style = MaterialTheme.typography.labelLarge)
@@ -335,7 +623,7 @@ private fun PeriodicitySection(
         }
 
         OutlinedButton(
-            onClick = { onEvent(EditorScreenEvent.AnalyzePeriodicity) },
+            onClick = { onEvent(WorkspaceScreenEvent.AnalyzePeriodicity) },
             enabled = !state.isAnalyzingPeriodicity,
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -372,7 +660,7 @@ private fun PeriodicitySection(
         Text("Гармоник в гребенчатом фильтре: ${state.periodicityHarmonics}", style = MaterialTheme.typography.labelMedium)
         Slider(
             value = state.periodicityHarmonics.toFloat(),
-            onValueChange = { onEvent(EditorScreenEvent.PeriodicityHarmonicsChanged(it.toInt())) },
+            onValueChange = { onEvent(WorkspaceScreenEvent.PeriodicityHarmonicsChanged(it.toInt())) },
             valueRange = 1f..12f,
             steps = 10,
         )
@@ -383,15 +671,15 @@ private fun PeriodicitySection(
                 playing = state.isPlayingSyncAverage,
                 onClick = {
                     if (state.isPlayingSyncAverage) {
-                        onEvent(EditorScreenEvent.StopPreview)
+                        onEvent(WorkspaceScreenEvent.StopPreview)
                     } else {
-                        onEvent(EditorScreenEvent.PreviewSynchronousAverage)
+                        onEvent(WorkspaceScreenEvent.PreviewSynchronousAverage)
                     }
                 },
                 modifier = Modifier.weight(1f),
             )
             FilledTonalButton(
-                onClick = { onEvent(EditorScreenEvent.ApplyCombFilter) },
+                onClick = { onEvent(WorkspaceScreenEvent.ApplyCombFilter) },
                 enabled = !state.isApplyingPeriodicity,
                 modifier = Modifier.weight(1f),
             ) {

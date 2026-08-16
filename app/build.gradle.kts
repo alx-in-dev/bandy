@@ -37,7 +37,6 @@ android {
 
 dependencies {
     implementation(project(":core"))
-    implementation(project(":feature:record"))
     implementation(project(":feature:editor"))
     implementation(project(":feature:library"))
 
