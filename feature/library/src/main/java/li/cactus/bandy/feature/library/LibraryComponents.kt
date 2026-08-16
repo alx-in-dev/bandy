@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,7 +35,9 @@ import li.cactus.bandy.core.domain.model.Recording
 @Composable
 internal fun RecordingCard(
     recording: Recording,
+    isPlaying: Boolean,
     onClick: () -> Unit,
+    onPlayToggle: () -> Unit,
     onShare: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -70,6 +74,13 @@ internal fun RecordingCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
+                IconButton(onClick = onPlayToggle) {
+                    if (isPlaying) {
+                        Icon(imageVector = Icons.Filled.Stop, contentDescription = "Остановить")
+                    } else {
+                        Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = "Прослушать")
+                    }
+                }
                 IconButton(onClick = onShare) {
                     Icon(imageVector = Icons.Filled.Share, contentDescription = "Поделиться")
                 }

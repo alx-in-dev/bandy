@@ -8,6 +8,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import li.cactus.bandy.core.data.audio.BiquadBandPass
@@ -17,14 +20,18 @@ import li.cactus.bandy.core.domain.repository.LivePreviewPlayer
 
 private const val PREVIEW_CHUNK_SAMPLES = 1024
 
-/** Streams a WAV file through AudioTrack, optionally through a live biquad band-pass bank, for before/after preview. */
+/**
+ * Streams a WAV file through AudioTrack, optionally through a live biquad band-pass bank, for
+ * before/after preview. A Koin single — shared by every screen that can play audio (editor
+ * preview, library quick-play) so starting playback in one place stops it everywhere else.
+ */
 internal class LivePreviewPlayerImpl : LivePreviewPlayer {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
 
-    @Volatile private var playing = false
-    override val isPlaying: Boolean get() = playing
+    private val _isPlaying = MutableStateFlow(false)
+    override val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
     override fun play(sourceFilePath: String, settings: FilterSettings?, loop: Boolean) {
         stop()
@@ -56,7 +63,7 @@ internal class LivePreviewPlayerImpl : LivePreviewPlayer {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
-        playing = true
+        _isPlaying.value = true
         track.play()
 
         job = scope.launch {
@@ -77,7 +84,7 @@ internal class LivePreviewPlayerImpl : LivePreviewPlayer {
             } finally {
                 track.stop()
                 track.release()
-                playing = false
+                _isPlaying.value = false
             }
         }
     }
@@ -85,6 +92,6 @@ internal class LivePreviewPlayerImpl : LivePreviewPlayer {
     override fun stop() {
         job?.cancel()
         job = null
-        playing = false
+        _isPlaying.value = false
     }
 }

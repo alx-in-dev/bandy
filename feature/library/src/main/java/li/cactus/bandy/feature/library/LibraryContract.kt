@@ -7,6 +7,7 @@ data class LibraryScreenState(
     val query: String = "",
     val recordings: List<Recording> = emptyList(),
     val isLoading: Boolean = true,
+    val playingRecordingId: Long? = null,
 ) {
     val isEmpty: Boolean get() = !isLoading && recordings.isEmpty()
 }
@@ -18,6 +19,7 @@ sealed interface LibraryScreenEvent {
     data class RenameConfirmed(val id: Long, val newTitle: String) : LibraryScreenEvent
     data class DeleteConfirmed(val recording: Recording) : LibraryScreenEvent
     data class ShareClicked(val recording: Recording) : LibraryScreenEvent
+    data class PlayToggled(val recording: Recording) : LibraryScreenEvent
 }
 
 sealed interface LibraryScreenAction {

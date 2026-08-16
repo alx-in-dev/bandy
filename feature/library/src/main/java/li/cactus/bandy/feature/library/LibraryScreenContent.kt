@@ -73,6 +73,7 @@ internal fun LibraryScreenContent(
 
                     else -> RecordingList(
                         recordings = state.recordings,
+                        playingRecordingId = state.playingRecordingId,
                         onEvent = onEvent,
                         onRenameRequest = { renameTarget = it },
                         onDeleteRequest = { deleteTarget = it },
@@ -124,6 +125,7 @@ private fun SearchField(
 @Composable
 private fun RecordingList(
     recordings: List<Recording>,
+    playingRecordingId: Long?,
     onEvent: (LibraryScreenEvent) -> Unit,
     onRenameRequest: (Recording) -> Unit,
     onDeleteRequest: (Recording) -> Unit,
@@ -136,7 +138,9 @@ private fun RecordingList(
         items(items = recordings, key = { it.id }) { recording ->
             RecordingCard(
                 recording = recording,
+                isPlaying = recording.id == playingRecordingId,
                 onClick = { onEvent(LibraryScreenEvent.RecordingClicked(recording)) },
+                onPlayToggle = { onEvent(LibraryScreenEvent.PlayToggled(recording)) },
                 onShare = { onEvent(LibraryScreenEvent.ShareClicked(recording)) },
                 onRename = { onRenameRequest(recording) },
                 onDelete = { onDeleteRequest(recording) },

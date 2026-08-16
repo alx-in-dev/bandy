@@ -12,8 +12,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -25,6 +25,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import li.cactus.bandy.core.domain.model.AveragedSpectrum
 import li.cactus.bandy.core.domain.model.FrequencyBand
+import li.cactus.bandy.core.ui.HeatColor
 
 private const val MIN_LOG_HZ = 20f
 
@@ -49,8 +50,6 @@ internal fun SpectrumChart(
     onBandSelected: (index: Int?) -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = 220.dp,
-    lineColor: Color = Color(0xFF4F9DFF),
-    fillColor: Color = Color(0x334F9DFF),
     bandColor: Color = Color(0x33FF9800),
     selectedBandColor: Color = Color(0x664F9DFF),
     markerColor: Color = Color(0xFFFF9800),
@@ -100,7 +99,7 @@ internal fun SpectrumChart(
             },
     ) {
         widthPx = size.width
-        drawSpectrum(spectrum, currentScale, maxHz, lineColor, fillColor)
+        drawSpectrum(spectrum, currentScale, maxHz)
         currentBands.forEachIndexed { index, band ->
             val xLow = freqToX(band.lowHz.toFloat(), currentScale, maxHz, size.width)
             val xHigh = freqToX(band.highHz.toFloat(), currentScale, maxHz, size.width)
@@ -118,41 +117,30 @@ internal fun SpectrumChart(
     }
 }
 
+/** Heat-colored bars per pixel column — same intensity ramp as the live waterfall, so the
+ * averaged spectrum reads as "one row" of the recording screen's spectrogram. */
 private fun DrawScope.drawSpectrum(
     spectrum: AveragedSpectrum,
     scale: FreqScale,
     maxHz: Float,
-    lineColor: Color,
-    fillColor: Color,
 ) {
     val mags = spectrum.magnitudes
     if (mags.isEmpty()) return
     val maxMag = mags.maxOrNull()?.takeIf { it > 0f } ?: return
     val binHz = spectrum.binHz
+    val widthPx = size.width.toInt().coerceAtLeast(1)
 
-    val line = Path()
-    val fill = Path()
-    var started = false
-    for (i in mags.indices) {
-        val freq = i * binHz
+    for (x in 0 until widthPx) {
+        val freq = xToFreq(x + 0.5f, scale, maxHz, size.width)
         if (scale == FreqScale.LOG && freq < MIN_LOG_HZ) continue
-        val x = freqToX(freq, scale, maxHz, size.width)
-        val y = size.height - (mags[i] / maxMag) * size.height
-        if (!started) {
-            line.moveTo(x, y)
-            fill.moveTo(x, size.height)
-            fill.lineTo(x, y)
-            started = true
-        } else {
-            line.lineTo(x, y)
-            fill.lineTo(x, y)
-        }
-    }
-    if (started) {
-        fill.lineTo(size.width, size.height)
-        fill.close()
-        drawPath(fill, fillColor)
-        drawPath(line, lineColor, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
+        val bin = (freq / binHz).roundToInt().coerceIn(0, mags.lastIndex)
+        val normalized = (mags[bin] / maxMag).coerceIn(0f, 1f)
+        val barHeight = normalized * size.height
+        drawRect(
+            color = HeatColor.of(normalized),
+            topLeft = Offset(x.toFloat(), size.height - barHeight),
+            size = Size(1.5f, barHeight),
+        )
     }
 }
 

@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
+import li.cactus.bandy.core.ui.HeatColor
 
 /**
  * Waterfall spectrogram: each entry in [frames] is one FFT row of normalized (0..1) magnitudes
@@ -34,31 +34,11 @@ internal fun SpectrumWaterfall(
                 val intensity = row[c]
                 if (intensity <= 0.01f) continue
                 drawRect(
-                    color = heatColor(intensity),
+                    color = HeatColor.of(intensity),
                     topLeft = Offset(c * colWidth, top),
                     size = Size(colWidth + 0.5f, rowHeight + 0.5f),
                 )
             }
         }
     }
-}
-
-/** Maps 0..1 intensity to a dark-blue → cyan → yellow → red heat ramp. */
-private fun heatColor(t: Float): Color {
-    val x = t.coerceIn(0f, 1f)
-    return when {
-        x < 0.33f -> lerp(Color(0xFF0D1B3E), Color(0xFF1DE9B6), x / 0.33f)
-        x < 0.66f -> lerp(Color(0xFF1DE9B6), Color(0xFFFFEB3B), (x - 0.33f) / 0.33f)
-        else -> lerp(Color(0xFFFFEB3B), Color(0xFFFF1744), (x - 0.66f) / 0.34f)
-    }
-}
-
-private fun lerp(a: Color, b: Color, f: Float): Color {
-    val g = f.coerceIn(0f, 1f)
-    return Color(
-        red = a.red + (b.red - a.red) * g,
-        green = a.green + (b.green - a.green) * g,
-        blue = a.blue + (b.blue - a.blue) * g,
-        alpha = 1f,
-    )
 }

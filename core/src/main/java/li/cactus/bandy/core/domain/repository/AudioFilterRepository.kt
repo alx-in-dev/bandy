@@ -1,5 +1,6 @@
 package li.cactus.bandy.core.domain.repository
 
+import kotlinx.coroutines.flow.StateFlow
 import li.cactus.bandy.core.domain.model.FilterSettings
 
 interface AudioFilterRepository {
@@ -18,5 +19,5 @@ interface LivePreviewPlayer {
      */
     fun play(sourceFilePath: String, settings: FilterSettings?, loop: Boolean = false)
     fun stop()
-    val isPlaying: Boolean
+    val isPlaying: StateFlow<Boolean>
 }

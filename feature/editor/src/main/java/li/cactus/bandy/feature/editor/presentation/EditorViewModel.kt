@@ -31,6 +31,15 @@ internal class EditorViewModel(
 
     init {
         loadData()
+        // The player is shared across screens (e.g. library quick-play) — if something else
+        // stops or takes over playback, drop our stale "now playing" UI state too.
+        viewModelScope.launch {
+            previewPlaybackUseCase.isPlaying.collect { playing ->
+                if (!playing && (currentState.previewMode != PreviewMode.OFF || currentState.isPlayingSyncAverage)) {
+                    setState { copy(previewMode = PreviewMode.OFF, isPlayingSyncAverage = false) }
+                }
+            }
+        }
     }
 
     private fun loadData() {

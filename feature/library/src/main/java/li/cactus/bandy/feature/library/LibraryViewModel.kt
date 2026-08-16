@@ -10,8 +10,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import li.cactus.bandy.core.domain.model.AudioFileFormat
+import li.cactus.bandy.core.domain.model.Recording
 import li.cactus.bandy.core.domain.usecase.DeleteRecordingUseCase
 import li.cactus.bandy.core.domain.usecase.ObserveRecordingsUseCase
+import li.cactus.bandy.core.domain.usecase.PreviewPlaybackUseCase
 import li.cactus.bandy.core.domain.usecase.RenameRecordingUseCase
 import li.cactus.bandy.core.domain.usecase.ShareRecordingUseCase
 import li.cactus.bandy.core.mvi.MVIBaseViewModel
@@ -21,6 +23,7 @@ internal class LibraryViewModel(
     private val renameRecordingUseCase: RenameRecordingUseCase,
     private val deleteRecordingUseCase: DeleteRecordingUseCase,
     private val shareRecordingUseCase: ShareRecordingUseCase,
+    private val previewPlaybackUseCase: PreviewPlaybackUseCase,
 ) : MVIBaseViewModel<LibraryScreenState, LibraryScreenAction, LibraryScreenEvent>(
     initialState = LibraryScreenState(),
 ) {
@@ -29,6 +32,13 @@ internal class LibraryViewModel(
 
     init {
         observeRecordings()
+        // The player is shared across screens — if playback stops (finished, or another
+        // screen took over), drop our "now playing" row highlight too.
+        viewModelScope.launch {
+            previewPlaybackUseCase.isPlaying.collect { playing ->
+                if (!playing) setState { copy(playingRecordingId = null) }
+            }
+        }
     }
 
     override fun obtainEvent(viewEvent: LibraryScreenEvent) {
@@ -38,17 +48,23 @@ internal class LibraryViewModel(
                 queryFlow.value = viewEvent.query
             }
 
-            is LibraryScreenEvent.RecordingClicked ->
+            is LibraryScreenEvent.RecordingClicked -> {
+                previewPlaybackUseCase.stop()
                 sendAction(LibraryScreenAction.NavigateToEditor(viewEvent.recording.id))
+            }
 
-            LibraryScreenEvent.NewRecordingClicked ->
+            LibraryScreenEvent.NewRecordingClicked -> {
+                previewPlaybackUseCase.stop()
                 sendAction(LibraryScreenAction.NavigateToRecord)
+            }
 
             is LibraryScreenEvent.RenameConfirmed -> rename(viewEvent.id, viewEvent.newTitle)
 
             is LibraryScreenEvent.DeleteConfirmed -> delete(viewEvent)
 
             is LibraryScreenEvent.ShareClicked -> share(viewEvent)
+
+            is LibraryScreenEvent.PlayToggled -> togglePlay(viewEvent.recording)
         }
     }
 
@@ -66,6 +82,16 @@ internal class LibraryViewModel(
         }
     }
 
+    private fun togglePlay(recording: Recording) {
+        if (currentState.playingRecordingId == recording.id) {
+            previewPlaybackUseCase.stop()
+            setState { copy(playingRecordingId = null) }
+        } else {
+            previewPlaybackUseCase.play(recording.filePath, null)
+            setState { copy(playingRecordingId = recording.id) }
+        }
+    }
+
     private fun rename(id: Long, newTitle: String) {
         val title = newTitle.trim()
         if (title.isEmpty()) return
@@ -73,6 +99,10 @@ internal class LibraryViewModel(
     }
 
     private fun delete(event: LibraryScreenEvent.DeleteConfirmed) {
+        if (currentState.playingRecordingId == event.recording.id) {
+            previewPlaybackUseCase.stop()
+            setState { copy(playingRecordingId = null) }
+        }
         viewModelScope.launch { deleteRecordingUseCase(event.recording) }
     }
 
@@ -83,6 +113,11 @@ internal class LibraryViewModel(
             AudioFileFormat.WAV -> MIME_WAV
         }
         sendAction(LibraryScreenAction.ShareRecording(uri, mimeType))
+    }
+
+    override fun onCleared() {
+        previewPlaybackUseCase.stop()
+        super.onCleared()
     }
 
     private companion object {

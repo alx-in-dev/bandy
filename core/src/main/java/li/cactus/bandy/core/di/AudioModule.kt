@@ -46,7 +46,9 @@ val audioModule = module {
 
     factoryOf(::AudioAnalysisRepositoryImpl) bind AudioAnalysisRepository::class
     factoryOf(::AudioFilterRepositoryImpl) bind AudioFilterRepository::class
-    factoryOf(::LivePreviewPlayerImpl) bind LivePreviewPlayer::class
+    // single: playback must be shared across screens (editor preview, library quick-play) —
+    // starting one stops the other instead of two AudioTracks playing over each other.
+    singleOf(::LivePreviewPlayerImpl) bind LivePreviewPlayer::class
     factoryOf(::ExportRepositoryImpl) bind ExportRepository::class
     factoryOf(::PeriodicityRepositoryImpl) bind PeriodicityRepository::class
 
@@ -55,7 +57,7 @@ val audioModule = module {
     factoryOf(::ObserveLiveSpectrumUseCaseImpl) bind ObserveLiveSpectrumUseCase::class
     factoryOf(::GetAveragedSpectrumUseCaseImpl) bind GetAveragedSpectrumUseCase::class
     factoryOf(::ApplyBandPassFilterUseCaseImpl) bind ApplyBandPassFilterUseCase::class
-    factoryOf(::PreviewPlaybackUseCaseImpl) bind PreviewPlaybackUseCase::class
+    singleOf(::PreviewPlaybackUseCaseImpl) bind PreviewPlaybackUseCase::class
     factoryOf(::ShareRecordingUseCaseImpl) bind ShareRecordingUseCase::class
     factoryOf(::AnalyzePeriodicityUseCaseImpl) bind AnalyzePeriodicityUseCase::class
     factoryOf(::ApplyCombFilterUseCaseImpl) bind ApplyCombFilterUseCase::class
