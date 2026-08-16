@@ -496,9 +496,18 @@ private fun EditingBody(
                         bands = state.bands,
                         selectedIndex = state.selectedBandIndex,
                         scale = state.scale,
+                        onBandChanged = { index, low, high ->
+                            onEvent(WorkspaceScreenEvent.BandChanged(index, low, high))
+                        },
+                        onBandMoved = { index, low ->
+                            onEvent(WorkspaceScreenEvent.BandMoved(index, low))
+                        },
+                        onBandSelected = { index ->
+                            onEvent(WorkspaceScreenEvent.BandSelected(index))
+                        },
                     )
                     Text(
-                        "Время слева направо, частота снизу вверх — полосы показаны как области, но перетаскивание доступно на графике «Спектр»",
+                        "Время слева направо, частота снизу вверх — перетащите край полосы, чтобы изменить границу, или её середину — чтобы сдвинуть целиком",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -19,21 +19,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import li.cactus.bandy.core.domain.model.AveragedSpectrum
 import li.cactus.bandy.core.domain.model.FrequencyBand
 import li.cactus.bandy.core.ui.HeatColor
-
-private enum class HandleKind { EDGE_LOW, EDGE_HIGH, MOVE }
-
-/** Which part of a band is being dragged, plus the state captured at drag-start for MOVE. */
-private data class DragTarget(
-    val bandIndex: Int,
-    val kind: HandleKind,
-    val originLowHz: Int = 0,
-    val originFreqHz: Float = 0f,
-)
 
 @Composable
 internal fun SpectrumChart(
@@ -70,7 +59,7 @@ internal fun SpectrumChart(
             .pointerInput(spectrum) {
                 detectDragGestures(
                     onDragStart = { pos ->
-                        val target = hitTest(pos.x, currentBands, currentScale, maxHz, widthPx, touchSlop)
+                        val target = hitTestBand(pos.x, currentBands, currentScale, maxHz, widthPx, touchSlop)
                         dragTarget = target
                         onSelected(target?.bandIndex)
                     },
@@ -138,41 +127,4 @@ private fun DrawScope.drawSpectrum(
             size = Size(1.5f, barHeight),
         )
     }
-}
-
-/** Edge handles win within [slop] of a low/high marker; otherwise a tap/drag inside a band's
- * rectangle selects and moves that whole band. */
-private fun hitTest(
-    x: Float,
-    bands: List<FrequencyBand>,
-    scale: FreqScale,
-    maxHz: Float,
-    width: Float,
-    slop: Float,
-): DragTarget? {
-    if (width <= 0f) return null
-
-    var bestEdge: DragTarget? = null
-    var bestDist = slop
-    bands.forEachIndexed { index, band ->
-        val xLow = freqToPixel(band.lowHz.toFloat(), scale, maxHz, width)
-        val xHigh = freqToPixel(band.highHz.toFloat(), scale, maxHz, width)
-        val dLow = abs(x - xLow)
-        val dHigh = abs(x - xHigh)
-        if (dLow <= bestDist) {
-            bestDist = dLow
-            bestEdge = DragTarget(index, HandleKind.EDGE_LOW)
-        }
-        if (dHigh <= bestDist) {
-            bestDist = dHigh
-            bestEdge = DragTarget(index, HandleKind.EDGE_HIGH)
-        }
-    }
-    if (bestEdge != null) return bestEdge
-
-    val freq = pixelToFreq(x, scale, maxHz, width)
-    val insideIndex = bands.indexOfFirst { freq >= it.lowHz && freq <= it.highHz }
-    if (insideIndex < 0) return null
-    val band = bands[insideIndex]
-    return DragTarget(insideIndex, HandleKind.MOVE, originLowHz = band.lowHz, originFreqHz = freq)
 }
