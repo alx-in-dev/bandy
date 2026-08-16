@@ -1,0 +1,51 @@
+package li.cactus.bandy.core.di
+
+import li.cactus.bandy.core.data.audio.AacEncoder
+import li.cactus.bandy.core.data.audio.AudioRecorderDataSource
+import li.cactus.bandy.core.data.repository.AudioAnalysisRepositoryImpl
+import li.cactus.bandy.core.data.repository.AudioFilterRepositoryImpl
+import li.cactus.bandy.core.data.repository.AudioRecorderControllerImpl
+import li.cactus.bandy.core.data.repository.ExportRepositoryImpl
+import li.cactus.bandy.core.data.repository.LivePreviewPlayerImpl
+import li.cactus.bandy.core.domain.repository.AudioAnalysisRepository
+import li.cactus.bandy.core.domain.repository.AudioFilterRepository
+import li.cactus.bandy.core.domain.repository.AudioRecorderController
+import li.cactus.bandy.core.domain.repository.ExportRepository
+import li.cactus.bandy.core.domain.repository.LivePreviewPlayer
+import li.cactus.bandy.core.domain.usecase.ApplyBandPassFilterUseCase
+import li.cactus.bandy.core.domain.usecase.ApplyBandPassFilterUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCase
+import li.cactus.bandy.core.domain.usecase.GetAveragedSpectrumUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCase
+import li.cactus.bandy.core.domain.usecase.ObserveLiveSpectrumUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.ObserveRecordingSessionUseCase
+import li.cactus.bandy.core.domain.usecase.ObserveRecordingSessionUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.PreviewPlaybackUseCase
+import li.cactus.bandy.core.domain.usecase.PreviewPlaybackUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.RecordingControlUseCase
+import li.cactus.bandy.core.domain.usecase.RecordingControlUseCaseImpl
+import li.cactus.bandy.core.domain.usecase.ShareRecordingUseCase
+import li.cactus.bandy.core.domain.usecase.ShareRecordingUseCaseImpl
+import org.koin.core.module.dsl.factoryOf
+import org.koin.core.module.dsl.singleOf
+import org.koin.dsl.bind
+import org.koin.dsl.module
+
+val audioModule = module {
+    singleOf(::AudioRecorderDataSource)
+    singleOf(::AudioRecorderControllerImpl) bind AudioRecorderController::class
+    singleOf(::AacEncoder)
+
+    factoryOf(::AudioAnalysisRepositoryImpl) bind AudioAnalysisRepository::class
+    factoryOf(::AudioFilterRepositoryImpl) bind AudioFilterRepository::class
+    factoryOf(::LivePreviewPlayerImpl) bind LivePreviewPlayer::class
+    factoryOf(::ExportRepositoryImpl) bind ExportRepository::class
+
+    factoryOf(::RecordingControlUseCaseImpl) bind RecordingControlUseCase::class
+    factoryOf(::ObserveRecordingSessionUseCaseImpl) bind ObserveRecordingSessionUseCase::class
+    factoryOf(::ObserveLiveSpectrumUseCaseImpl) bind ObserveLiveSpectrumUseCase::class
+    factoryOf(::GetAveragedSpectrumUseCaseImpl) bind GetAveragedSpectrumUseCase::class
+    factoryOf(::ApplyBandPassFilterUseCaseImpl) bind ApplyBandPassFilterUseCase::class
+    factoryOf(::PreviewPlaybackUseCaseImpl) bind PreviewPlaybackUseCase::class
+    factoryOf(::ShareRecordingUseCaseImpl) bind ShareRecordingUseCase::class
+}
