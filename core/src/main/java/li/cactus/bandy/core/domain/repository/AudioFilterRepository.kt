@@ -11,8 +11,12 @@ interface AudioFilterRepository {
 }
 
 interface LivePreviewPlayer {
-    /** Streams [sourceFilePath] through AudioTrack, optionally through a live biquad band-pass bank. */
-    fun play(sourceFilePath: String, settings: FilterSettings?)
+    /**
+     * Streams [sourceFilePath] through AudioTrack, optionally through a live biquad band-pass
+     * bank. When [loop] is true, playback restarts from the beginning on reaching the end,
+     * until [stop] is called.
+     */
+    fun play(sourceFilePath: String, settings: FilterSettings?, loop: Boolean = false)
     fun stop()
     val isPlaying: Boolean
 }

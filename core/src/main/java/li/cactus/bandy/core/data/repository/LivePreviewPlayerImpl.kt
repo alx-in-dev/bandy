@@ -26,14 +26,11 @@ internal class LivePreviewPlayerImpl : LivePreviewPlayer {
     @Volatile private var playing = false
     override val isPlaying: Boolean get() = playing
 
-    override fun play(sourceFilePath: String, settings: FilterSettings?) {
+    override fun play(sourceFilePath: String, settings: FilterSettings?, loop: Boolean) {
         stop()
 
         val reader = WavFileReader(File(sourceFilePath))
         val sampleRate = reader.sampleRate
-        val filter = settings?.takeUnless { it.isFullSpectrum }?.let {
-            BiquadBandPass(sampleRate, it.bands, it.butterworthOrder)
-        }
 
         val minBuffer = AudioTrack.getMinBufferSize(
             sampleRate,
@@ -64,12 +61,19 @@ internal class LivePreviewPlayerImpl : LivePreviewPlayer {
 
         job = scope.launch {
             try {
-                reader.readChunked(PREVIEW_CHUNK_SAMPLES) { chunk ->
-                    if (isActive) {
-                        val processed = filter?.processBuffer(chunk) ?: chunk
-                        track.write(processed, 0, processed.size)
+                do {
+                    // Fresh filter instance per pass so biquad state doesn't carry a
+                    // discontinuity click across the loop point.
+                    val filter = settings?.takeUnless { it.isFullSpectrum }?.let {
+                        BiquadBandPass(sampleRate, it.bands, it.butterworthOrder)
                     }
-                }
+                    reader.readChunked(PREVIEW_CHUNK_SAMPLES) { chunk ->
+                        if (isActive) {
+                            val processed = filter?.processBuffer(chunk) ?: chunk
+                            track.write(processed, 0, processed.size)
+                        }
+                    }
+                } while (loop && isActive)
             } finally {
                 track.stop()
                 track.release()

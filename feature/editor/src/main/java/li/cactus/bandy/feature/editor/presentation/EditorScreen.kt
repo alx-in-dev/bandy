@@ -1,5 +1,7 @@
 package li.cactus.bandy.feature.editor.presentation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -148,11 +151,25 @@ private fun EditorBody(
         SpectrumChart(
             spectrum = spectrum,
             bands = state.bands,
+            selectedIndex = state.selectedBandIndex,
             scale = state.scale,
             onBandChanged = { index, low, high ->
                 onEvent(EditorScreenEvent.BandChanged(index, low, high))
             },
+            onBandMoved = { index, low ->
+                onEvent(EditorScreenEvent.BandMoved(index, low))
+            },
+            onBandSelected = { index ->
+                onEvent(EditorScreenEvent.BandSelected(index))
+            },
         )
+        if (state.bands.isNotEmpty()) {
+            Text(
+                "Перетащите край полосы, чтобы изменить границу, или её середину — чтобы сдвинуть целиком",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         // Presets + add band
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -178,7 +195,12 @@ private fun EditorBody(
             Text("Нет полос — полный спектр (без фильтрации)", style = MaterialTheme.typography.bodyMedium)
         } else {
             state.bands.forEachIndexed { index, band ->
-                BandRow(band = band, onRemove = { onEvent(EditorScreenEvent.RemoveBand(index)) })
+                BandRow(
+                    band = band,
+                    selected = index == state.selectedBandIndex,
+                    onSelect = { onEvent(EditorScreenEvent.BandSelected(index)) },
+                    onRemove = { onEvent(EditorScreenEvent.RemoveBand(index)) },
+                )
             }
         }
 
@@ -213,6 +235,18 @@ private fun EditorBody(
                 onClick = { onEvent(EditorScreenEvent.PreviewModeChanged(PreviewMode.AFTER)) },
                 shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
             ) { Text("После") }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Зациклить воспроизведение")
+            Switch(
+                checked = state.loopPreview,
+                onCheckedChange = { onEvent(EditorScreenEvent.LoopPreviewChanged(it)) },
+            )
         }
 
         HorizontalDivider()
@@ -251,9 +285,21 @@ private fun EditorBody(
 }
 
 @Composable
-private fun BandRow(band: FrequencyBand, onRemove: () -> Unit) {
+private fun BandRow(
+    band: FrequencyBand,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onRemove: () -> Unit,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                shape = MaterialTheme.shapes.small,
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

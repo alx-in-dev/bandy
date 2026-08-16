@@ -51,11 +51,21 @@ internal class EditorViewModel(
 
             is EditorScreenEvent.AddBand -> addBand()
 
-            is EditorScreenEvent.RemoveBand -> setState {
-                copy(bands = bands.filterIndexed { i, _ -> i != viewEvent.index })
-            }.also { restartPreviewIfActive() }
+            is EditorScreenEvent.RemoveBand -> {
+                setState {
+                    copy(
+                        bands = bands.filterIndexed { i, _ -> i != viewEvent.index },
+                        selectedBandIndex = null,
+                    )
+                }
+                restartPreviewIfActive()
+            }
 
             is EditorScreenEvent.BandChanged -> changeBand(viewEvent.index, viewEvent.lowHz, viewEvent.highHz)
+
+            is EditorScreenEvent.BandMoved -> moveBand(viewEvent.index, viewEvent.lowHz)
+
+            is EditorScreenEvent.BandSelected -> setState { copy(selectedBandIndex = viewEvent.index) }
 
             is EditorScreenEvent.ApplyVoicePreset -> setBands(listOf(clampToSpectrum(FrequencyBand.Presets.VOICE)))
 
@@ -69,6 +79,11 @@ internal class EditorViewModel(
             }
 
             is EditorScreenEvent.PreviewModeChanged -> setPreviewMode(viewEvent.mode)
+
+            is EditorScreenEvent.LoopPreviewChanged -> {
+                setState { copy(loopPreview = viewEvent.enabled) }
+                restartPreviewIfActive(alsoRestartBefore = true)
+            }
 
             is EditorScreenEvent.AlsoExportAacChanged -> setState { copy(alsoExportAac = viewEvent.enabled) }
 
@@ -110,20 +125,43 @@ internal class EditorViewModel(
         restartPreviewIfActive()
     }
 
+    /** Translates a band (preserving its width) to a new low edge, clamped against neighbors. */
+    private fun moveBand(index: Int, targetLowHz: Int) {
+        val bands = currentState.bands
+        val band = bands.getOrNull(index) ?: return
+        val width = band.highHz - band.lowHz
+        val nyquist = currentState.nyquistHz
+        val others = bands.filterIndexed { i, _ -> i != index }
+
+        val leftBound = others.filter { it.highHz <= band.lowHz }.maxOfOrNull { it.highHz } ?: 0
+        val rightBound = others.filter { it.lowHz >= band.highHz }.minOfOrNull { it.lowHz } ?: nyquist
+
+        val newLow = targetLowHz.coerceIn(leftBound, (rightBound - width).coerceAtLeast(leftBound))
+        val newHigh = newLow + width
+
+        val updated = bands.mapIndexed { i, b -> if (i == index) FrequencyBand(newLow, newHigh) else b }
+        setState { copy(bands = updated) }
+        restartPreviewIfActive()
+    }
+
     private fun setPreviewMode(mode: PreviewMode) {
         val recording = currentState.recording ?: return
         previewPlaybackUseCase.stop()
+        val loop = currentState.loopPreview
         when (mode) {
             PreviewMode.OFF -> Unit
-            PreviewMode.BEFORE -> previewPlaybackUseCase.play(recording.filePath, null)
-            PreviewMode.AFTER -> previewPlaybackUseCase.play(recording.filePath, currentFilterSettings())
+            PreviewMode.BEFORE -> previewPlaybackUseCase.play(recording.filePath, null, loop)
+            PreviewMode.AFTER -> previewPlaybackUseCase.play(recording.filePath, currentFilterSettings(), loop)
         }
         setState { copy(previewMode = mode) }
     }
 
-    private fun restartPreviewIfActive() {
-        if (currentState.previewMode == PreviewMode.AFTER) {
-            setPreviewMode(PreviewMode.AFTER)
+    /** Bands/order changes only need to restart an active AFTER preview; [alsoRestartBefore] additionally
+     * restarts BEFORE, used when only the loop flag changed and BEFORE playback should pick it up live. */
+    private fun restartPreviewIfActive(alsoRestartBefore: Boolean = false) {
+        val mode = currentState.previewMode
+        if (mode == PreviewMode.AFTER || (alsoRestartBefore && mode == PreviewMode.BEFORE)) {
+            setPreviewMode(mode)
         }
     }
 
